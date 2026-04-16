@@ -5,23 +5,24 @@
 #
 # This file wires together the frontend components and the orchestration
 # backend. It manages Streamlit session state to hold the LangGraph execution
-# state across user interactions (form submit → agent runs → user approves).
+# state across user interactions (form submit → agent runs → user picks
+# strategy → write events).
 #
 # STEPS TO COMPLETE:
 # 1. Initialise session-state keys on first load (see _init_session_state).
 # 2. Render the intake form; on submit, package inputs and kick off the graph.
 # 3. While the graph is running, show a spinner / loading state.
-# 4. Once the graph reaches the human-approval node, display the schedule
-#    and rationale, then render approve/reject buttons.
-# 5. On approve → resume graph → write events → show success.
-# 6. On reject  → reset session → show "no changes made".
+# 4. Once the graph reaches the human-approval node, display all three
+#    candidate schedules with rationales and violation badges.
+# 5. On strategy pick → resume graph → write events → show success.
+# 6. On reject all    → reset session → show "no changes made".
 # =============================================================================
 
 import streamlit as st
 
 from src.frontend.intake_form import render_intake_form
-from src.frontend.schedule_display import render_schedule, render_rationale
-from src.frontend.approval_controls import render_approval_buttons
+from src.frontend.schedule_display import render_all_candidates
+from src.frontend.approval_controls import render_strategy_buttons
 from src.orchestration.graph import build_graph, run_graph_until_approval, resume_graph
 
 
@@ -59,14 +60,19 @@ def main() -> None:
          e. Set phase to "review" and st.rerun().
 
        "review":
-         a. Extract the proposed schedule and rationale from graph_state.
-         b. Call render_schedule(schedule).
-         c. Call render_rationale(rationale).
-         d. If the graph_state contains unresolved violations, show a warning.
-         e. Call render_approval_buttons() — returns "approve", "reject", or None.
-         f. If "approve": set phase to "done", call resume_graph(graph_state, approved=True).
-         g. If "reject":  set phase to "done", store rejection message.
-         h. st.rerun().
+         a. Extract the graph_state.
+         b. Call render_all_candidates(graph_state) — shows three columns
+            (or collapsed view if candidates_identical).
+         c. Call render_strategy_buttons(graph_state.get("candidates_identical", False)).
+         d. If ("approve", strategy_name):
+            - Set phase to "done".
+            - Call resume_graph(graph, graph_state, approved=True)
+              with selected_strategy=strategy_name.
+            - Store success message in session_state["result"].
+         e. If ("reject", None):
+            - Set phase to "done".
+            - Store rejection message.
+         f. st.rerun().
 
        "done":
          a. Display st.session_state["result"] (success or rejection message).
