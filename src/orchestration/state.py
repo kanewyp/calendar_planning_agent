@@ -71,21 +71,28 @@ class AgentState(TypedDict, total=False):
     candidate_min_fragmentation: list[ProposedEvent]
     candidate_energy_aware: list[ProposedEvent]
 
-    # --- Scoring (set by score_candidates node) ---
-    selected_candidate: list[ProposedEvent]
-    candidate_scores: dict[str, int]            # heuristic_name → violation count
+    # --- Validation per candidate (set by validate_candidates node) ---
+    # Maps strategy name → ValidationResult for each candidate
+    candidate_validations: dict[str, ValidationResult]
 
-    # --- Validation & repair (set by validator / repair loop) ---
-    validation_result: ValidationResult
-    repair_iteration: int
-    repair_history: list[ValidationResult]      # for debugging
+    # --- Rationales per candidate (set by generate_rationales node) ---
+    # Maps strategy name → short explanation of the tradeoff
+    candidate_rationales: dict[str, str]
 
-    # --- Final output (set by rationale & proposal nodes) ---
+    # --- Near-duplicate detection (set by build_proposal node) ---
+    # True if all three candidates produce effectively the same schedule
+    candidates_identical: bool
+
+    # --- User choice (set by frontend after user picks a strategy) ---
+    # One of: "deadline_first" | "min_fragmentation" | "energy_aware" | None
+    selected_strategy: str | None
+
+    # --- Final output (set after user selects a strategy) ---
     final_schedule: list[ProposedEvent]
-    rationale: str
 
     # --- Human approval (set by approval node / frontend) ---
-    user_approved: bool | None                  # None = awaiting decision
+    # None = awaiting choice, True = picked a strategy, False = rejected all
+    user_approved: bool | None
 
     # --- Write result ---
     write_results: list[dict[str, Any]]         # API responses from event creation
