@@ -4,7 +4,7 @@
 # Assembles all nodes and edges into the stateful directed graph.
 # Provides helper functions used by app.py to run and resume the graph.
 #
-# GRAPH TOPOLOGY:
+# GRAPH TOPOLOGY (user-choice model):
 #
 #   START
 #     │
@@ -21,28 +21,18 @@
 #     └──────────────────┴────────────────────┘
 #                        │
 #                        ▼
-#                  score_candidates
+#                validate_candidates  (run validator on all 3, no winner picked)
 #                        │
 #                        ▼
-#                  validate (conditional)
+#                generate_rationales  (LLM writes one rationale per strategy)
+#                        │
+#                        ▼
+#                  build_proposal     (detect near-duplicates, package for UI)
+#                        │
+#                        ▼
+#                  human_approval  ← (pause here, user picks a strategy or rejects)
 #                    │         │
-#                    │ fail    │ pass
-#                    ▼         │
-#               repair_loop    │
-#                    │         │
-#                    ▼         │
-#              (re-validate)───┘
-#                        │
-#                        ▼
-#                generate_rationale
-#                        │
-#                        ▼
-#                  build_proposal
-#                        │
-#                        ▼
-#                  human_approval  ← (pause here, wait for user)
-#                    │         │
-#                approve     reject
+#               pick strategy  reject all
 #                    │         │
 #                    ▼         ▼
 #              write_events   END
@@ -55,6 +45,11 @@
 # 2. Build the StateGraph using the AgentState TypedDict.
 # 3. Add nodes, edges, and conditional edges per the topology above.
 # 4. Implement the two helper functions used by app.py.
+#
+# NOTE: The repair loop has been removed from the default flow.
+# Violations are surfaced honestly per-candidate so the user can
+# judge tradeoffs. The score_candidates "pick a winner" node is
+# replaced by validate_candidates (validator only, no selection).
 # =============================================================================
 
 from __future__ import annotations
@@ -73,43 +68,20 @@ from src.orchestration.nodes.schedule_candidates import (
     min_fragmentation_node,
     energy_aware_node,
 )
-from src.orchestration.nodes.score_candidates import score_candidates_node
-from src.orchestration.nodes.repair_loop import repair_loop_node
-from src.orchestration.nodes.generate_rationale import generate_rationale_node
+from src.orchestration.nodes.validate_candidates import validate_candidates_node
+from src.orchestration.nodes.generate_rationales import generate_rationales_node
 from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.human_approval import human_approval_node
 from src.orchestration.nodes.write_events import write_events_node
-
-
-def _should_repair(state: AgentState) -> str:
-    """Conditional edge: decide whether to enter the repair loop.
-
-    STEPS:
-    1. Read state["validation_result"]["passed"].
-    2. If True  → return "generate_rationale".
-    3. If False → return "repair_loop".
-    """
-    pass  # TODO: implement
-
-
-def _repair_or_exit(state: AgentState) -> str:
-    """Conditional edge after repair: retry validation or give up.
-
-    STEPS:
-    1. If state["validation_result"]["passed"] → return "generate_rationale".
-    2. If state["repair_iteration"] >= MAX_REPAIR_ITERATIONS → return "generate_rationale"
-       (forward best-effort schedule with warning).
-    3. Otherwise → return "repair_loop" (try again).
-    """
-    pass  # TODO: implement
 
 
 def _approval_decision(state: AgentState) -> str:
     """Conditional edge after human approval.
 
     STEPS:
-    1. If state["user_approved"] is True  → return "write_events".
-    2. Otherwise                          → return END.
+    1. If state["user_approved"] is True and state["selected_strategy"] is set
+       → return "write_events".
+    2. Otherwise (rejected or no strategy chosen) → return END.
     """
     pass  # TODO: implement
 
@@ -120,17 +92,16 @@ def build_graph() -> StateGraph:
     STEPS:
     1. Create graph = StateGraph(AgentState).
     2. Add nodes:
-       graph.add_node("decompose_goal",       decompose_goal_node)
-       graph.add_node("fetch_events",          fetch_events_node)
-       graph.add_node("deadline_first",        deadline_first_node)
-       graph.add_node("min_fragmentation",     min_fragmentation_node)
-       graph.add_node("energy_aware",          energy_aware_node)
-       graph.add_node("score_candidates",      score_candidates_node)
-       graph.add_node("repair_loop",           repair_loop_node)
-       graph.add_node("generate_rationale",    generate_rationale_node)
-       graph.add_node("build_proposal",        build_proposal_node)
-       graph.add_node("human_approval",        human_approval_node)
-       graph.add_node("write_events",          write_events_node)
+       graph.add_node("decompose_goal",        decompose_goal_node)
+       graph.add_node("fetch_events",           fetch_events_node)
+       graph.add_node("deadline_first",         deadline_first_node)
+       graph.add_node("min_fragmentation",      min_fragmentation_node)
+       graph.add_node("energy_aware",           energy_aware_node)
+       graph.add_node("validate_candidates",    validate_candidates_node)
+       graph.add_node("generate_rationales",    generate_rationales_node)
+       graph.add_node("build_proposal",         build_proposal_node)
+       graph.add_node("human_approval",         human_approval_node)
+       graph.add_node("write_events",           write_events_node)
 
     3. Set entry point:
        graph.set_entry_point("decompose_goal")
@@ -138,23 +109,25 @@ def build_graph() -> StateGraph:
     4. Add edges:
        decompose_goal → fetch_events
        fetch_events   → [deadline_first, min_fragmentation, energy_aware]
-         (Use graph.add_edge for sequential or implement fan-out for parallel)
-       deadline_first       → score_candidates
-       min_fragmentation    → score_candidates
-       energy_aware         → score_candidates
-       score_candidates     → conditional(_should_repair)
-       repair_loop          → conditional(_repair_or_exit)
-       generate_rationale   → build_proposal
+         (fan-out: all three run in parallel)
+       deadline_first       → validate_candidates
+       min_fragmentation    → validate_candidates
+       energy_aware         → validate_candidates
+         (fan-in: validate_candidates waits for all three)
+       validate_candidates  → generate_rationales
+       generate_rationales  → build_proposal
        build_proposal       → human_approval
        human_approval       → conditional(_approval_decision)
        write_events         → END
 
-    5. Compile and return graph.compile().
+    5. Compile with interrupt_before=["human_approval"] and return.
 
     NOTE on parallelism:
     - LangGraph supports fan-out / fan-in natively.
-    - If using an older version, you can run the three heuristic branches
-      sequentially (deadline_first → min_frag → energy_aware → score)
+    - The three heuristic nodes write to separate state keys
+      (candidate_deadline_first, candidate_min_fragmentation,
+       candidate_energy_aware) so no reducer conflict.
+    - If using an older LangGraph version, run them sequentially
       and refactor to parallel later.
     """
     pass  # TODO: implement
@@ -187,14 +160,13 @@ def run_graph_until_approval(
            work_start=user_inputs["work_start"].strftime("%H:%M"),
            work_end=user_inputs["work_end"].strftime("%H:%M"),
            max_session_minutes=user_inputs["max_session_minutes"],
-           repair_iteration=0,
+           selected_strategy=None,
            user_approved=None,
        )
     2. Invoke the graph with the initial state.
-       - If using LangGraph's interrupt_before=["human_approval"],
-         the graph will pause at that node and return the state.
-       - Alternatively, run all nodes up to build_proposal, then
-         return the state without entering human_approval.
+       - The graph pauses at human_approval (interrupt_before).
+       - At this point, state contains all three candidates,
+         their validations, their rationales, and candidates_identical.
     3. Return the paused state.
     """
     pass  # TODO: implement
@@ -217,7 +189,11 @@ def resume_graph(
 
     STEPS:
     1. Set paused_state["user_approved"] = approved.
-    2. Resume graph execution from the human_approval node.
-    3. Return the final state.
+    2. If approved:
+       a. Set paused_state["selected_strategy"] to the user's chosen strategy.
+       b. Set paused_state["final_schedule"] to the candidate matching
+          the selected strategy.
+    3. Resume graph execution from the human_approval node.
+    4. Return the final state.
     """
     pass  # TODO: implement
