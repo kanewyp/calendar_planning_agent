@@ -36,3 +36,7 @@ credentials.json
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Quarto build artifacts
+PROGRAMMER_MANUAL.html
+PROGRAMMER_MANUAL_files/
