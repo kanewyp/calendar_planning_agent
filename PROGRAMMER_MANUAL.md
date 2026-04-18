@@ -31,9 +31,9 @@ The application is a **Calendar Augmentation Agent** that:
 3. Reads the user's **Google Calendar** to find busy blocks and compute **free slots**.
 4. Runs **three heuristic schedulers in parallel**, each producing a candidate schedule.
 5. **Validates** each candidate against four hard constraints (overlaps, working hours, deadline, self-overlap).
-6. Selects the best candidate, optionally **repairs** violations (up to 3 iterations).
-7. Generates a **rationale** explaining the plan.
-8. Presents the schedule to the user for **approval** via a Streamlit UI.
+6. Generates a **rationale** for each strategy explaining tradeoffs.
+7. Presents **all three options** to the user for **approval** via a Streamlit UI.
+8. The user **picks a strategy** or rejects all.
 9. On approval, **writes events** to Google Calendar (add-only, never update/delete).
 
 ---
@@ -67,11 +67,10 @@ calendar_planning_agent/
 │   │   │   ├── decompose_goal.py
 │   │   │   ├── fetch_events.py
 │   │   │   ├── schedule_candidates.py
-│   │   │   ├── score_candidates.py
-│   │   │   ├── repair_loop.py
-│   │   │   ├── generate_rationale.py
+│   │   │   ├── validate_candidates.py
+│   │   │   ├── generate_rationales.py
 │   │   │   ├── build_proposal.py
-│   │   │   ├── human_approval.py   (already implemented — passthrough)
+│   │   │   ├── human_approval.py
 │   │   │   └── write_events.py
 │   │   └── heuristics/          ←   Three scheduling strategies
 │   │       ├── deadline_first.py
@@ -156,27 +155,19 @@ User fills Streamlit form
      │  each produces: list[ProposedEvent]              │
      ▼         ▼                 ▼                      │
   ┌──────────────────────────────────┐                  │
-  │       score_candidates           │  uses validator  │
-  │  picks candidate w/ fewest       │                  │
-  │  violations                      │                  │
+  │    validate_candidates           │  uses validator  │
+  │  validates all 3 candidates      │  (no selection)  │
   └────────────┬─────────────────────┘                  │
-               │ produces: selected_candidate,          │
-               │           validation_result            │
+               │ produces: candidate_validations        │
                ▼                                        │
-  ┌──────────────────┐                                  │
-  │  repair_loop     │  (0–3 iterations)                │
-  │  shifts events   │  re-validates each time          │
-  └────────┬─────────┘                                  │
-           │ produces: repaired selected_candidate      │
+  ┌───────────────────┐                                 │
+  │generate_rationales│  calls LLM via call_llm_text()  │
+  └────────┬──────────┘  (one rationale per strategy)   │
+           │ produces: candidate_rationales              │
            ▼                                            │
   ┌──────────────────┐                                  │
-  │generate_rationale│  calls LLM via call_llm_text()   │
-  └────────┬─────────┘                                  │
-           │ produces: rationale (string)                │
-           ▼                                            │
-  ┌──────────────────┐                                  │
-  │ build_proposal   │  packages final_schedule +       │
-  └────────┬─────────┘  rationale for frontend          │
+  │ build_proposal   │  detects near-duplicates,        │
+  └────────┬─────────┘  packages for frontend           │
            │                                            │
            ▼                                            │
   ┌──────────────────┐                                  │
@@ -320,16 +311,14 @@ STEP 3 ─── Scheduling heuristics (depend on state.py types + free_slots ou
   │
 STEP 4 ─── Graph nodes (each depends on ≥1 of the above)
   │
-  ├── src/orchestration/nodes/decompose_goal.py    ← needs llm_client
-  ├── src/orchestration/nodes/fetch_events.py      ← needs calendar_api
-  ├── src/orchestration/nodes/schedule_candidates.py ← needs heuristics
-  ├── src/orchestration/nodes/score_candidates.py  ← needs validator
-  ├── src/orchestration/nodes/repair_loop.py       ← needs validator + free_slots
-  ├── src/orchestration/nodes/generate_rationale.py← needs llm_client
-  ├── src/orchestration/nodes/build_proposal.py    ← pure passthrough
-  └── src/orchestration/nodes/write_events.py      ← needs calendar_api
-  │
-  │   (human_approval.py is already done — it's a passthrough)
+  ├── src/orchestration/nodes/decompose_goal.py     ← needs llm_client
+  ├── src/orchestration/nodes/fetch_events.py       ← needs calendar_api
+  ├── src/orchestration/nodes/schedule_candidates.py← needs heuristics
+  ├── src/orchestration/nodes/validate_candidates.py← needs validator
+  ├── src/orchestration/nodes/generate_rationales.py← needs llm_client
+  ├── src/orchestration/nodes/build_proposal.py     ← pure logic (near-duplicate detection)
+  ├── src/orchestration/nodes/human_approval.py     ← maps selected strategy to final_schedule
+  └── src/orchestration/nodes/write_events.py       ← needs calendar_api
   │
 STEP 5 ─── Graph assembly (depends on ALL nodes)
   │
@@ -654,40 +643,29 @@ def deadline_first_node(state):
     return {"candidate_deadline_first": result}
 ```
 
-#### `nodes/score_candidates.py`
-Validate each of the three candidates, count violations, select the best:
+#### `nodes/validate_candidates.py`
+Validate all three candidates (no selection — user decides):
 ```python
-def score_candidates_node(state):
-    candidates = {
+def validate_candidates_node(state):
+    strategies = {
         "deadline_first": state["candidate_deadline_first"],
         "min_fragmentation": state["candidate_min_fragmentation"],
         "energy_aware": state["candidate_energy_aware"],
     }
-    scores = {}
-    for name, candidate in candidates.items():
-        result = validate_schedule(candidate, busy, work_s, work_e, deadline)
-        scores[name] = len(result["violations"])
-    best_name = min(scores, key=scores.get)
-    best = candidates[best_name]
-    full_result = validate_schedule(best, ...)
-    return {"selected_candidate": best, "candidate_scores": scores, "validation_result": full_result}
+    validations = {}
+    for name, candidate in strategies.items():
+        validations[name] = validate_schedule(candidate, busy, work_s, work_e, deadline)
+    return {"candidate_validations": validations}
 ```
 
-#### `nodes/repair_loop.py`
-The most complex node. For each violation, attempt to move the offending event:
-- Find the event by name in `selected_candidate`.
-- Find the next free slot that fits the event's duration.
-- Move the event there.
-- After all moves, re-validate.
-- Increment `repair_iteration`.
-
-**Key safety rule:** Always check `repair_iteration < MAX_REPAIR_ITERATIONS` first.
-
-#### `nodes/generate_rationale.py`
-Format the prompt with subtask and schedule summaries, call `call_llm_text`, return `{"rationale": text, "final_schedule": state["selected_candidate"]}`.
+#### `nodes/generate_rationales.py`
+For each of the 3 strategies, format a prompt with subtask summary, schedule summary, and validation results. Call `call_llm_text` for each. Return `{"candidate_rationales": {"deadline_first": r1, "min_fragmentation": r2, "energy_aware": r3}}`.
 
 #### `nodes/build_proposal.py`
-Mostly a passthrough — optionally sort `final_schedule` by start time. Return `{}`.
+Detects near-duplicate candidates (all three produce identical start/end times). Return `{"candidates_identical": True/False}`.
+
+#### `nodes/human_approval.py`
+Maps the user's selected strategy to `final_schedule`. If `user_approved` and `selected_strategy` are set, copies the chosen candidate to `final_schedule`. Otherwise returns empty dict.
 
 #### `nodes/write_events.py`
 Branch on `CALENDAR_MODE`. Call `create_mock_event` or `create_events_batch` for each event. Return `{"write_results": responses}`.
@@ -711,9 +689,8 @@ graph.add_node("fetch_events", fetch_events_node)
 graph.add_node("deadline_first", deadline_first_node)
 graph.add_node("min_fragmentation", min_fragmentation_node)
 graph.add_node("energy_aware", energy_aware_node)
-graph.add_node("score_candidates", score_candidates_node)
-graph.add_node("repair_loop", repair_loop_node)
-graph.add_node("generate_rationale", generate_rationale_node)
+graph.add_node("validate_candidates", validate_candidates_node)
+graph.add_node("generate_rationales", generate_rationales_node)
 graph.add_node("build_proposal", build_proposal_node)
 graph.add_node("human_approval", human_approval_node)
 graph.add_node("write_events", write_events_node)
@@ -724,57 +701,36 @@ graph.set_entry_point("decompose_goal")
 # Edges
 graph.add_edge("decompose_goal", "fetch_events")
 
-# Fan-out to three heuristics (sequential is fine to start)
+# Fan-out to three heuristics (parallel)
 graph.add_edge("fetch_events", "deadline_first")
-graph.add_edge("deadline_first", "min_fragmentation")
-graph.add_edge("min_fragmentation", "energy_aware")
-graph.add_edge("energy_aware", "score_candidates")
+graph.add_edge("fetch_events", "min_fragmentation")
+graph.add_edge("fetch_events", "energy_aware")
 
-# Conditional: need repair?
-graph.add_conditional_edges("score_candidates", _should_repair, {
-    "generate_rationale": "generate_rationale",
-    "repair_loop": "repair_loop",
-})
+# Fan-in: all 3 heuristics -> validate_candidates
+graph.add_edge("deadline_first", "validate_candidates")
+graph.add_edge("min_fragmentation", "validate_candidates")
+graph.add_edge("energy_aware", "validate_candidates")
 
-# Conditional: repair done or retry?
-graph.add_conditional_edges("repair_loop", _repair_or_exit, {
-    "generate_rationale": "generate_rationale",
-    "repair_loop": "repair_loop",
-})
-
-graph.add_edge("generate_rationale", "build_proposal")
+# Linear continuation
+graph.add_edge("validate_candidates", "generate_rationales")
+graph.add_edge("generate_rationales", "build_proposal")
 graph.add_edge("build_proposal", "human_approval")
 
 # Conditional: approve or reject?
-graph.add_conditional_edges("human_approval", _approval_decision, {
-    "write_events": "write_events",
-    END: END,
-})
+graph.add_conditional_edges("human_approval", _approval_decision)
 
 graph.add_edge("write_events", END)
 
 return graph.compile(interrupt_before=["human_approval"])
 ```
 
-**Note on parallelism:** The three heuristics are wired sequentially here for simplicity. To run them in parallel with LangGraph, you would use `graph.add_edge("fetch_events", "deadline_first")`, `graph.add_edge("fetch_events", "min_fragmentation")`, `graph.add_edge("fetch_events", "energy_aware")` (fan-out) and then all three converge into `score_candidates` (fan-in). Consult the LangGraph docs for the exact fan-out/fan-in API available in your version.
+**Note on fan-out/fan-in:** The three heuristic nodes write to separate state keys (`candidate_deadline_first`, `candidate_min_fragmentation`, `candidate_energy_aware`) so there's no reducer conflict. LangGraph supports this natively.
 
 #### Conditional Edge Functions
 
 ```python
-def _should_repair(state):
-    if state["validation_result"]["passed"]:
-        return "generate_rationale"
-    return "repair_loop"
-
-def _repair_or_exit(state):
-    if state["validation_result"]["passed"]:
-        return "generate_rationale"
-    if state["repair_iteration"] >= settings.MAX_REPAIR_ITERATIONS:
-        return "generate_rationale"   # give up, forward best-effort
-    return "repair_loop"
-
 def _approval_decision(state):
-    if state.get("user_approved") is True:
+    if state.get("user_approved") is True and state.get("selected_strategy"):
         return "write_events"
     return END
 ```
@@ -788,7 +744,7 @@ initial_state = {
     "work_start": user_inputs["work_start"].strftime("%H:%M"),
     "work_end": user_inputs["work_end"].strftime("%H:%M"),
     "max_session_minutes": user_inputs["max_session_minutes"],
-    "repair_iteration": 0,
+    "selected_strategy": None,
     "user_approved": None,
 }
 # With interrupt_before=["human_approval"], the graph pauses here.
@@ -885,10 +841,10 @@ Quick-reference table of every file, what it depends on, and its key functions.
 | 8 | `nodes/decompose_goal.py` | `llm_client` | `decompose_goal_node()` | LLM prompt engineering |
 | 9 | `nodes/fetch_events.py` | `calendar_api` | `fetch_events_node()` | Branches mock vs live |
 | 10 | `nodes/schedule_candidates.py` | heuristics | 3 thin wrapper nodes | Each returns 1 key |
-| 11 | `nodes/score_candidates.py` | `validator` | `score_candidates_node()` | Picks best of 3 |
-| 12 | `nodes/repair_loop.py` | `validator`, `free_slots` | `repair_loop_node()` | Max 3 iterations |
-| 13 | `nodes/generate_rationale.py` | `llm_client` | `generate_rationale_node()` | LLM text generation |
-| 14 | `nodes/build_proposal.py` | nothing | `build_proposal_node()` | Sort + cleanup |
+| 11 | `nodes/validate_candidates.py` | `validator` | `validate_candidates_node()` | Validates all 3, no selection |
+| 12 | `nodes/generate_rationales.py` | `llm_client` | `generate_rationales_node()` | One rationale per strategy |
+| 13 | `nodes/build_proposal.py` | nothing | `build_proposal_node()` | Near-duplicate detection |
+| 14 | `nodes/human_approval.py` | nothing | `human_approval_node()` | Maps selected strategy to final_schedule |
 | 15 | `nodes/write_events.py` | `calendar_api` | `write_events_node()` | Branches mock vs live |
 | 16 | `orchestration/graph.py` | all nodes | `build_graph()`, `run_graph_until_approval()`, `resume_graph()` | LangGraph assembly |
 | 17 | `frontend/intake_form.py` | nothing | `render_intake_form()` | Streamlit form |
@@ -978,13 +934,6 @@ return state
 
 ### Slot-Splitting Consistency
 All three heuristics need to split free slots when a subtask doesn't consume the entire slot. If you find yourself writing the same logic three times, extract it into a shared helper in `src/orchestration/heuristics/__init__.py`.
-
-### Repair Loop Safety
-The repair loop **must** check the iteration counter **before** doing any work:
-```python
-if state["repair_iteration"] >= settings.MAX_REPAIR_ITERATIONS:
-    return {}  # no changes, conditional edge will route to rationale
-```
 
 ### Google Calendar Add-Only Rule
 The `events.py` module must **never** call `service.events().update()` or `service.events().delete()`. This is a hard safety rule. The only write operation is `service.events().insert()`.

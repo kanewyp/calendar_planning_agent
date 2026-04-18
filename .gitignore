@@ -37,6 +37,10 @@ credentials.json
 # Streamlit
 .streamlit/secrets.toml
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # Quarto build artifacts
 PROGRAMMER_MANUAL.html
 PROGRAMMER_MANUAL_files/
+CLAUDE.html
