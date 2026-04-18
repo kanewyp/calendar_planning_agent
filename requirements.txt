@@ -4,8 +4,8 @@
 
 # --- Core framework ---
 streamlit>=1.32.0,<2.0
-langgraph>=0.2.0,<1.0
-langchain-core>=0.2.0,<1.0
+langgraph>=1.0.0,<2.0
+langchain-core>=0.3.0,<1.0
 
 # --- LLM ---
 anthropic>=0.30.0,<1.0
