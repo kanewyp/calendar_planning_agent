@@ -6,8 +6,8 @@
 #
 # STEPS TO COMPLETE:
 # 1. Test each heuristic with sample subtasks and free slots.
-# 2. Test the scoring/selection logic.
-# 3. Test the repair loop with known violations.
+# 2. Test validate_candidates_node with known violations.
+# 3. Test build_proposal_node near-duplicate detection.
 # 4. Test the full graph wiring (optional integration test).
 # =============================================================================
 
@@ -85,39 +85,49 @@ class TestEnergyAwareHeuristic:
         pass  # TODO: implement
 
 
-class TestScoreCandidates:
-    """Test the candidate scoring and selection logic."""
+class TestValidateCandidates:
+    """Test the validate_candidates node."""
 
-    def test_selects_candidate_with_fewest_violations(self):
-        """The candidate with zero violations should be selected.
+    def test_all_candidates_validated(self):
+        """All three candidates should receive a ValidationResult.
 
         STEPS:
-        1. Create three mock candidates, one with 0 violations, others with >0.
-        2. Assert the zero-violation candidate is selected.
+        1. Build state with three mock candidates and busy_blocks.
+        2. Run validate_candidates_node.
+        3. Assert candidate_validations has entries for all three strategies.
+        """
+        pass  # TODO: implement
+
+    def test_clean_candidate_passes(self):
+        """A candidate with no constraint violations should pass validation.
+
+        STEPS:
+        1. Build a candidate with no overlaps, within working hours and deadline.
+        2. Run validate_candidates_node.
+        3. Assert passed=True and violations is empty.
         """
         pass  # TODO: implement
 
 
-class TestRepairLoop:
-    """Test the repair loop node."""
+class TestBuildProposal:
+    """Test the build_proposal node."""
 
-    def test_overlap_is_repaired(self):
-        """An overlapping event should be moved to the next free slot.
+    def test_identical_candidates_detected(self):
+        """When all three candidates produce the same schedule, detect it.
 
         STEPS:
-        1. Create a candidate with one OVERLAP violation.
-        2. Provide free_slots with an available slot to move it to.
-        3. Run repair_loop_node with the state.
-        4. Assert the violation is resolved in the output.
+        1. Build state with three identical candidate lists.
+        2. Run build_proposal_node.
+        3. Assert candidates_identical is True.
         """
         pass  # TODO: implement
 
-    def test_max_iterations_respected(self):
-        """Repair loop should not exceed MAX_REPAIR_ITERATIONS.
+    def test_different_candidates_not_flagged(self):
+        """When candidates differ, candidates_identical should be False.
 
         STEPS:
-        1. Set repair_iteration = MAX_REPAIR_ITERATIONS.
-        2. Run repair_loop_node.
-        3. Assert it does NOT attempt more repairs.
+        1. Build state with three different candidate lists.
+        2. Run build_proposal_node.
+        3. Assert candidates_identical is False.
         """
         pass  # TODO: implement

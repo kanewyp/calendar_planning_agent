@@ -100,7 +100,6 @@ See `.env.example`. Key vars:
 - `ANTHROPIC_API_KEY` -- required for LLM calls
 - `GOOGLE_CLIENT_SECRET_FILE` -- path to OAuth client secret JSON
 - `CALENDAR_MODE` -- `mock` (default) or `live`
-- `MAX_REPAIR_ITERATIONS` -- default 3
 - `DEFAULT_WORK_START` / `DEFAULT_WORK_END` -- default 09:00 / 18:00
 
 ## Important Constraints
@@ -128,8 +127,21 @@ pytest -v
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `pytest -v` on Python 3.11 and 3.12 against `main` on push/PR. Uses `CALENDAR_MODE=mock`.
 
-## Implementation Order (from PROGRAMMER_MANUAL.md)
+## Implementation Order (Two-Person Split)
 
-1. **Phase 1 (Pure Logic):** validator/constraints.py, free_slots.py, mock_calendar.py, heuristics
-2. **Phase 2 (LLM + Validation):** llm_client/client.py, decompose_goal, validate_candidates, generate_rationales
-3. **Phase 3 (Graph + Frontend):** graph.py wiring, build_proposal (near-duplicate detection), app.py session state, frontend components (three-column display, strategy picker), write_events
+See `docs/PROJECT_PLAN.md` for full details and `docs/WILL_IMPLEMENTATION_GUIDE.md` for Will's step-by-step guide.
+
+### Phase 1 — Foundations (Parallel, No Cross-Dependencies)
+- **Will:** `llm_client/client.py`, `calendar_api/auth.py`, `calendar_api/events.py`, `tests/test_llm_client.py`
+- **Partner:** `validator/constraints.py`, `free_slots.py`, `mock_calendar.py`, 3 heuristics, `tests/test_validator.py`, `tests/test_calendar_api.py`
+
+### Phase 2 — Graph Nodes & Frontend (Partially Parallel)
+- **Will:** All 8 graph nodes (`decompose_goal`, `fetch_events`, `schedule_candidates`, `validate_candidates`, `generate_rationales`, `build_proposal`)
+- **Partner:** `frontend/intake_form.py`, `frontend/schedule_display.py`
+
+### Phase 3 — Graph Wiring & App Integration (Collaborative)
+- **Will:** `graph.py` (build/run/resume), `human_approval`, `write_events`
+- **Partner:** `approval_controls.py`, `app.py` (session state controller)
+
+### Phase 4 — End-to-End Testing (Together)
+- Full flow in `CALENDAR_MODE=mock`, edge cases, CI green on 3.11 & 3.12, Docker

@@ -46,10 +46,8 @@
 # 3. Add nodes, edges, and conditional edges per the topology above.
 # 4. Implement the two helper functions used by app.py.
 #
-# NOTE: The repair loop has been removed from the default flow.
-# Violations are surfaced honestly per-candidate so the user can
-# judge tradeoffs. The score_candidates "pick a winner" node is
-# replaced by validate_candidates (validator only, no selection).
+# NOTE: No repair loop or score/pick-a-winner step. All three candidates
+# are validated and presented to the user, who picks a strategy or rejects all.
 # =============================================================================
 
 from __future__ import annotations

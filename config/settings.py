@@ -38,7 +38,6 @@ class Settings:
     CALENDAR_MODE: str = os.getenv("CALENDAR_MODE", "mock")
 
     # --- Scheduling defaults ---
-    MAX_REPAIR_ITERATIONS: int = int(os.getenv("MAX_REPAIR_ITERATIONS", "3"))
     DEFAULT_WORK_START: str = os.getenv("DEFAULT_WORK_START", "09:00")
     DEFAULT_WORK_END: str = os.getenv("DEFAULT_WORK_END", "18:00")
 

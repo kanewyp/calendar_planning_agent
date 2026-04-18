@@ -152,11 +152,12 @@ git push -u origin feat/my-feature
 
 ### Implementation order
 
-Follow the phased approach from `PROGRAMMER_MANUAL.md`:
+Follow the phased approach from `docs/PROJECT_PLAN.md`:
 
-1. **Phase 1** — Pure-logic modules first: `validator/constraints.py`, `free_slots.py`, `mock_calendar.py`, heuristics.
-2. **Phase 2** — LLM integration: `llm_client/client.py`, orchestration nodes that call the LLM.
-3. **Phase 3** — Graph wiring and frontend: `graph.py`, `app.py`, frontend components.
+1. **Phase 1** — Foundations (parallel): Will does LLM client + Calendar API; Partner does validator, free slots, mock calendar, heuristics.
+2. **Phase 2** — Graph nodes + frontend (partially parallel): Will does all graph nodes; Partner does intake form + schedule display.
+3. **Phase 3** — Graph wiring + app integration (collaborative): Will does `graph.py` + final nodes; Partner does approval controls + `app.py`.
+4. **Phase 4** — End-to-end testing (together).
 
 This order matters — later modules depend on earlier ones. Don't skip ahead.
 
