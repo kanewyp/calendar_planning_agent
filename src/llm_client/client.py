@@ -31,13 +31,10 @@ MAX_RETRIES = 2
 
 
 def _build_client() -> anthropic.Anthropic:
-    """Instantiate the Anthropic client with the configured API key.
-
-    STEPS:
-    1. Return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY).
-    2. If the key is empty/missing, raise a clear ValueError.
-    """
-    pass  # TODO: implement
+    """Instantiate the Anthropic client with the configured API key."""
+    if not settings.ANTHROPIC_API_KEY:
+        raise ValueError("ANTHROPIC_API_KEY is not set")
+    return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 
 def _call_anthropic(
@@ -66,7 +63,14 @@ def _call_anthropic(
     3. Extract and return response.content[0].text.
     4. Let API exceptions propagate — the caller handles retries.
     """
-    pass  # TODO: implement
+    client = _build_client()
+    response = client.messages.create(
+        model=MODEL_ID,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text
 
 
 def call_llm_json(prompt: str, temperature: float = 0.0) -> Any:
