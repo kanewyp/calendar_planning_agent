@@ -144,4 +144,12 @@ def call_llm_text(prompt: str, temperature: float = 0.0) -> str:
        c. If anthropic.APIError, retry.
     2. After all retries exhausted, raise RuntimeError.
     """
-    pass  # TODO: implement
+    last_error: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return _call_anthropic(prompt, temperature)
+        except anthropic.APIError as e:
+            last_error = e
+    raise RuntimeError(
+        f"LLM call failed after {MAX_RETRIES + 1} attempts: {last_error}"
+    )

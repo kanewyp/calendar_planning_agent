@@ -3,86 +3,62 @@
 # =============================================================================
 # Tests that the LLM client correctly handles retries, JSON parsing, and
 # error cases.  Uses mocking — does NOT make real Anthropic API calls.
-#
-# STEPS TO COMPLETE:
-# 1. Mock the anthropic.Anthropic client.
-# 2. Test successful JSON parsing.
-# 3. Test retry on JSON parse failure.
-# 4. Test retry on API error.
-# 5. Test exhausted retries raise the expected exception.
 # =============================================================================
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
+import anthropic
 import pytest
+
+from src.llm_client.client import MAX_RETRIES, call_llm_json, call_llm_text
+
+
+class _FakeAPIError(anthropic.APIError):
+    """Minimal APIError subclass for tests — skips the parent's strict __init__."""
+
+    def __init__(self, message: str = "fake api error") -> None:
+        Exception.__init__(self, message)
+
+
+_PATCH_TARGET = "src.llm_client.client._call_anthropic"
 
 
 class TestCallLlmJson:
-    """Tests for call_llm_json."""
-
     def test_valid_json_response_parsed(self):
-        """A well-formed JSON response should be parsed and returned.
-
-        STEPS:
-        1. Mock _call_anthropic to return '[{"name": "task1"}]'.
-        2. Call call_llm_json("some prompt").
-        3. Assert result == [{"name": "task1"}].
-        """
-        pass  # TODO: implement
+        with patch(_PATCH_TARGET, return_value='[{"name": "task1"}]') as m:
+            assert call_llm_json("prompt") == [{"name": "task1"}]
+        assert m.call_count == 1
 
     def test_retry_on_invalid_json(self):
-        """If the first response is not valid JSON, the client should retry.
-
-        STEPS:
-        1. Mock _call_anthropic to return "Here is the JSON: [...]" on the
-           first call, then valid '[]' on the second call.
-        2. Call call_llm_json.
-        3. Assert _call_anthropic was called twice.
-        4. Assert result is [].
-        """
-        pass  # TODO: implement
+        with patch(_PATCH_TARGET, side_effect=["Here is the JSON: [...]", "[]"]) as m:
+            assert call_llm_json("prompt") == []
+        assert m.call_count == 2
 
     def test_exhausted_retries_raises(self):
-        """After MAX_RETRIES + 1 failed attempts, ValueError should be raised.
-
-        STEPS:
-        1. Mock _call_anthropic to always return invalid JSON.
-        2. Call call_llm_json.
-        3. Assert ValueError is raised.
-        """
-        pass  # TODO: implement
+        with patch(_PATCH_TARGET, return_value="not json at all") as m:
+            with pytest.raises(ValueError, match="Failed to get valid JSON"):
+                call_llm_json("prompt")
+        assert m.call_count == MAX_RETRIES + 1
 
     def test_retry_on_api_error(self):
-        """An anthropic.APIError should trigger a retry.
-
-        STEPS:
-        1. Mock _call_anthropic to raise anthropic.APIError on the first
-           call, then return valid JSON on the second.
-        2. Assert call_llm_json returns the valid result.
-        """
-        pass  # TODO: implement
+        with patch(
+            _PATCH_TARGET,
+            side_effect=[_FakeAPIError(), '{"ok": true}'],
+        ) as m:
+            assert call_llm_json("prompt") == {"ok": True}
+        assert m.call_count == 2
 
 
 class TestCallLlmText:
-    """Tests for call_llm_text."""
-
     def test_returns_text(self):
-        """A normal response should be returned as-is.
-
-        STEPS:
-        1. Mock _call_anthropic to return "Some rationale text."
-        2. Call call_llm_text("some prompt").
-        3. Assert result == "Some rationale text."
-        """
-        pass  # TODO: implement
+        with patch(_PATCH_TARGET, return_value="Some rationale text.") as m:
+            assert call_llm_text("prompt") == "Some rationale text."
+        assert m.call_count == 1
 
     def test_exhausted_retries_raises_runtime_error(self):
-        """After all retries fail, RuntimeError should be raised.
-
-        STEPS:
-        1. Mock _call_anthropic to always raise APIError.
-        2. Assert RuntimeError is raised.
-        """
-        pass  # TODO: implement
+        with patch(_PATCH_TARGET, side_effect=_FakeAPIError()) as m:
+            with pytest.raises(RuntimeError, match="LLM call failed"):
+                call_llm_text("prompt")
+        assert m.call_count == MAX_RETRIES + 1
