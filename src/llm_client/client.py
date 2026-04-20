@@ -103,7 +103,23 @@ def call_llm_json(prompt: str, temperature: float = 0.0) -> Any:
           - If this is not the last attempt, continue to next retry.
     2. After all retries exhausted, raise ValueError with a descriptive message.
     """
-    pass  # TODO: implement
+    current_prompt = prompt
+    last_error: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            response_text = _call_anthropic(current_prompt, temperature).strip()
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            last_error = e
+            current_prompt = (
+                f"{prompt}\n\n"
+                "Your previous response was not valid JSON. Return ONLY JSON."
+            )
+        except anthropic.APIError as e:
+            last_error = e
+    raise ValueError(
+        f"Failed to get valid JSON after {MAX_RETRIES + 1} attempts: {last_error}"
+    )
 
 
 def call_llm_text(prompt: str, temperature: float = 0.0) -> str:
