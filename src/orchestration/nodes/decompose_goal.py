@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from src.llm_client.client import call_llm_json
@@ -61,4 +60,35 @@ def decompose_goal_node(state: AgentState) -> dict[str, Any]:
     - If call_llm_json raises after all retries, raise a clear error
       that app.py can catch and display to the user.
     """
-    pass  # TODO: implement
+    max_session = state["max_session_minutes"]
+    prompt = DECOMPOSITION_PROMPT.format(
+        goal=state["goal"],
+        deadline=state["deadline"],
+        context=state.get("context", ""),
+        max_session=max_session,
+    )
+
+    raw = call_llm_json(prompt)
+    if not isinstance(raw, list):
+        raise ValueError(f"Expected a JSON array of subtasks, got {type(raw).__name__}")
+
+    subtasks: list[Subtask] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        description = item.get("description", "")
+        duration = item.get("duration_minutes")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if not isinstance(duration, int) or duration <= 0:
+            continue
+        subtasks.append(
+            Subtask(
+                name=name.strip(),
+                description=description if isinstance(description, str) else "",
+                duration_minutes=min(duration, max_session),
+            )
+        )
+
+    return {"subtasks": subtasks}
