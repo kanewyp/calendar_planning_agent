@@ -15,8 +15,116 @@ from __future__ import annotations
 
 import datetime
 from typing import Any
+from unittest.mock import patch
 
 import pytest
+
+from src.orchestration.nodes.decompose_goal import decompose_goal_node
+
+
+class TestDecomposeGoalNode:
+    def test_valid_llm_output_returns_subtasks(self):
+        state = {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "context": "I know JavaScript already.",
+            "max_session_minutes": 90,
+        }
+        llm_output = [
+            {
+                "name": "Read the intro docs",
+                "description": "Work through the official React introduction.",
+                "duration_minutes": 45,
+            },
+            {
+                "name": "Build a counter",
+                "description": "Practice state updates in a small component.",
+                "duration_minutes": 60,
+            },
+        ]
+
+        with patch(
+            "src.orchestration.nodes.decompose_goal.call_llm_json",
+            return_value=llm_output,
+        ):
+            result = decompose_goal_node(state)
+
+        assert result == {"subtasks": llm_output}
+
+    def test_empty_llm_output_raises(self):
+        state = {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "max_session_minutes": 90,
+        }
+
+        with patch(
+            "src.orchestration.nodes.decompose_goal.call_llm_json",
+            return_value=[],
+        ):
+            with pytest.raises(ValueError, match="non-empty JSON array"):
+                decompose_goal_node(state)
+
+    def test_malformed_subtask_raises_instead_of_skipping(self):
+        state = {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "max_session_minutes": 90,
+        }
+        llm_output = [
+            {
+                "name": "Read the intro docs",
+                "description": "Work through the official React introduction.",
+                "duration_minutes": 45,
+            },
+            {
+                "name": "",
+                "description": "This item is malformed.",
+                "duration_minutes": 30,
+            },
+        ]
+
+        with patch(
+            "src.orchestration.nodes.decompose_goal.call_llm_json",
+            return_value=llm_output,
+        ):
+            with pytest.raises(ValueError, match="invalid name"):
+                decompose_goal_node(state)
+
+    def test_over_limit_duration_raises(self):
+        state = {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "max_session_minutes": 90,
+        }
+        llm_output = [
+            {
+                "name": "Build a mini app",
+                "description": "Too large for one focused work session.",
+                "duration_minutes": 120,
+            }
+        ]
+
+        with patch(
+            "src.orchestration.nodes.decompose_goal.call_llm_json",
+            return_value=llm_output,
+        ):
+            with pytest.raises(ValueError, match="exceeds max session"):
+                decompose_goal_node(state)
+
+    def test_llm_failure_is_wrapped_with_node_context(self):
+        state = {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "max_session_minutes": 90,
+        }
+
+        with patch(
+            "src.orchestration.nodes.decompose_goal.call_llm_json",
+            side_effect=ValueError("bad llm output"),
+        ):
+            with pytest.raises(RuntimeError, match="Goal decomposition failed"):
+                decompose_goal_node(state)
 
 
 class TestDeadlineFirstHeuristic:

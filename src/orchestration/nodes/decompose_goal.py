@@ -68,26 +68,66 @@ def decompose_goal_node(state: AgentState) -> dict[str, Any]:
         max_session=max_session,
     )
 
-    raw = call_llm_json(prompt)
-    if not isinstance(raw, list):
-        raise ValueError(f"Expected a JSON array of subtasks, got {type(raw).__name__}")
+    try:
+        raw = call_llm_json(prompt)
+    except Exception as exc:
+        raise RuntimeError(
+            "Goal decomposition failed: unable to get a valid subtask list from the LLM"
+        ) from exc
+
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(
+            "Goal decomposition failed: expected a non-empty JSON array of subtasks"
+        )
 
     subtasks: list[Subtask] = []
-    for item in raw:
+    required_keys = {"name", "description", "duration_minutes"}
+    for index, item in enumerate(raw, start=1):
         if not isinstance(item, dict):
-            continue
-        name = item.get("name")
-        description = item.get("description", "")
-        duration = item.get("duration_minutes")
+            raise ValueError(
+                f"Goal decomposition failed: subtask {index} is not an object"
+            )
+
+        missing_keys = required_keys - set(item)
+        extra_keys = set(item) - required_keys
+        if missing_keys or extra_keys:
+            details: list[str] = []
+            if missing_keys:
+                details.append(f"missing keys {sorted(missing_keys)}")
+            if extra_keys:
+                details.append(f"unexpected keys {sorted(extra_keys)}")
+            raise ValueError(
+                f"Goal decomposition failed: subtask {index} has invalid fields "
+                f"({', '.join(details)})"
+            )
+
+        name = item["name"]
+        description = item["description"]
+        duration = item["duration_minutes"]
+
         if not isinstance(name, str) or not name.strip():
-            continue
+            raise ValueError(
+                f"Goal decomposition failed: subtask {index} has an invalid name"
+            )
+        if not isinstance(description, str):
+            raise ValueError(
+                f"Goal decomposition failed: subtask {index} has an invalid description"
+            )
         if not isinstance(duration, int) or duration <= 0:
-            continue
+            raise ValueError(
+                f"Goal decomposition failed: subtask {index} has an invalid duration"
+            )
+        if duration > max_session:
+            raise ValueError(
+                f"Goal decomposition failed: subtask {index} duration {duration} "
+                f"exceeds max session {max_session}"
+            )
+
         subtasks.append(
             Subtask(
                 name=name.strip(),
-                description=description if isinstance(description, str) else "",
-                duration_minutes=min(duration, max_session),
+                description=description,
+                duration_minutes=duration,
             )
         )
 
