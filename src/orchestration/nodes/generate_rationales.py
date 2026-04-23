@@ -72,4 +72,72 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
     This makes 3 LLM calls. Consider using a smaller/faster model
     (e.g. claude-haiku-4-5-20251001) for rationale generation.
     """
-    pass  # TODO: implement
+    required_state_keys = {
+        "goal",
+        "subtasks",
+        "candidate_deadline_first",
+        "candidate_min_fragmentation",
+        "candidate_energy_aware",
+        "candidate_validations",
+    }
+    missing = required_state_keys - set(state)
+    if missing:
+        raise ValueError(
+            f"generate_rationales_node missing required state keys: {sorted(missing)}"
+        )
+
+    subtasks_summary = "\n".join(
+        f"- {s['name']} ({s['duration_minutes']} min): {s['description']}"
+        for s in state["subtasks"]
+    )
+
+    strategy_state_keys = {
+        "deadline_first": "candidate_deadline_first",
+        "min_fragmentation": "candidate_min_fragmentation",
+        "energy_aware": "candidate_energy_aware",
+    }
+
+    rationales: dict[str, str] = {}
+    for strategy_name, state_key in strategy_state_keys.items():
+        candidate = state[state_key]
+
+        validation = state["candidate_validations"].get(strategy_name)
+        if validation is None:
+            raise ValueError(
+                f"generate_rationales_node: no validation result for strategy '{strategy_name}'"
+            )
+        violations = validation["violations"]
+        violation_count = len(violations)
+        violation_summary = (
+            "None"
+            if violation_count == 0
+            else ", ".join(v["violation_type"] for v in violations)
+        )
+
+        schedule_summary = (
+            "(no events scheduled)"
+            if not candidate
+            else "\n".join(
+                f"- {e['name']}: {e['start']} to {e['end']}" for e in candidate
+            )
+        )
+
+        prompt = RATIONALE_PROMPT.format(
+            goal=state["goal"],
+            context=state.get("context", ""),
+            strategy_name=strategy_name,
+            strategy_description=STRATEGY_DESCRIPTIONS[strategy_name],
+            subtasks_summary=subtasks_summary,
+            schedule_summary=schedule_summary,
+            violation_count=violation_count,
+            violation_summary=violation_summary,
+        )
+
+        try:
+            rationales[strategy_name] = call_llm_text(prompt).strip()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Rationale generation failed for strategy '{strategy_name}'"
+            ) from exc
+
+    return {"candidate_rationales": rationales}
