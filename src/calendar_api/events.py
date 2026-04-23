@@ -52,7 +52,29 @@ def fetch_busy_blocks(
        c. Append {"start": <start_iso>, "end": <end_iso>} to the result list.
     4. Return the list sorted by start time.
     """
-    pass  # TODO: implement
+    service = build_calendar_service()
+    response = (
+        service.events()
+        .list(
+            calendarId=calendar_id,
+            timeMin=time_min.isoformat(),
+            timeMax=time_max.isoformat(),
+            singleEvents=True,
+            orderBy="startTime",
+        )
+        .execute()
+    )
+
+    busy_blocks: list[dict[str, str]] = []
+    for item in response.get("items", []):
+        start = item.get("start", {}).get("dateTime")
+        end = item.get("end", {}).get("dateTime")
+        if not start or not end:
+            continue
+        busy_blocks.append({"start": start, "end": end})
+
+    busy_blocks.sort(key=lambda b: b["start"])
+    return busy_blocks
 
 
 def create_event(
@@ -91,7 +113,14 @@ def create_event(
     SECURITY NOTE:
     - This function must NEVER call events().update() or events().delete().
     """
-    pass  # TODO: implement
+    service = build_calendar_service()
+    event_body = {
+        "summary": summary,
+        "description": f"{AGENT_TAG} {description}",
+        "start": {"dateTime": start.isoformat(), "timeZone": str(start.tzinfo)},
+        "end": {"dateTime": end.isoformat(), "timeZone": str(end.tzinfo)},
+    }
+    return service.events().insert(calendarId=calendar_id, body=event_body).execute()
 
 
 def create_events_batch(
@@ -114,4 +143,16 @@ def create_events_batch(
     3. Call create_event(name, description, start_dt, end_dt, calendar_id).
     4. Collect and return all responses.
     """
-    pass  # TODO: implement
+    responses: list[dict[str, Any]] = []
+    for event in events:
+        start_dt = datetime.datetime.fromisoformat(event["start"])
+        end_dt = datetime.datetime.fromisoformat(event["end"])
+        response = create_event(
+            summary=event["name"],
+            description=event["description"],
+            start=start_dt,
+            end=end_dt,
+            calendar_id=calendar_id,
+        )
+        responses.append(response)
+    return responses
