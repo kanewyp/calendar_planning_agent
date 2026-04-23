@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
+from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.decompose_goal import decompose_goal_node
 
 
@@ -228,7 +229,23 @@ class TestBuildProposal:
         2. Run build_proposal_node.
         3. Assert candidates_identical is True.
         """
-        pass  # TODO: implement
+        candidate = [
+            {
+                "name": "Read React docs",
+                "description": "Work through the introductory documentation.",
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            }
+        ]
+        state = {
+            "candidate_deadline_first": candidate,
+            "candidate_min_fragmentation": list(candidate),
+            "candidate_energy_aware": list(candidate),
+        }
+
+        result = build_proposal_node(state)
+
+        assert result == {"candidates_identical": True}
 
     def test_different_candidates_not_flagged(self):
         """When candidates differ, candidates_identical should be False.
@@ -238,4 +255,23 @@ class TestBuildProposal:
         2. Run build_proposal_node.
         3. Assert candidates_identical is False.
         """
-        pass  # TODO: implement
+        shared_time = {
+            "description": "One hour block.",
+            "start": "2026-04-06T10:00:00+00:00",
+            "end": "2026-04-06T11:00:00+00:00",
+        }
+        state = {
+            "candidate_deadline_first": [
+                {"name": "Read React docs", **shared_time}
+            ],
+            "candidate_min_fragmentation": [
+                {"name": "Build counter component", **shared_time}
+            ],
+            "candidate_energy_aware": [
+                {"name": "Read React docs", **shared_time}
+            ],
+        }
+
+        result = build_proposal_node(state)
+
+        assert result == {"candidates_identical": False}
