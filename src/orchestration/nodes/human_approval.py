@@ -46,4 +46,28 @@ def human_approval_node(state: AgentState) -> dict[str, Any]:
     2. If state["user_approved"] is False:
        a. Return {} — the conditional edge routes to END.
     """
-    pass  # TODO: implement
+    user_approved = state.get("user_approved")
+
+    if user_approved is False:
+        return {}
+
+    if user_approved is not True:
+        raise ValueError(
+            "human_approval_node resumed without a boolean user_approved value "
+            f"(got {user_approved!r})"
+        )
+
+    selected_strategy = state.get("selected_strategy")
+    if selected_strategy not in STRATEGY_TO_STATE_KEY:
+        raise ValueError(
+            f"human_approval_node: invalid selected_strategy {selected_strategy!r}; "
+            f"expected one of {sorted(STRATEGY_TO_STATE_KEY)}"
+        )
+
+    state_key = STRATEGY_TO_STATE_KEY[selected_strategy]
+    if state_key not in state:
+        raise ValueError(
+            f"human_approval_node: candidate '{state_key}' is missing from state"
+        )
+
+    return {"final_schedule": state[state_key]}
