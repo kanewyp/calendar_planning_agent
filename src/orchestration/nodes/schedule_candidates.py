@@ -30,7 +30,17 @@ def deadline_first_node(state: AgentState) -> dict[str, Any]:
     2. Call schedule_deadline_first(subtasks, free_slots).
     3. Return {"candidate_deadline_first": result}.
     """
-    pass  # TODO: implement
+    subtasks = state.get("subtasks")
+    free_slots = state.get("free_slots")
+
+    if not isinstance(subtasks, list) or not isinstance(free_slots, list):
+        raise ValueError(
+            "deadline_first_node: missing subtasks/free_slots list in state"
+        )
+
+    return {
+        "candidate_deadline_first": schedule_deadline_first(subtasks, free_slots)
+    }
 
 
 def min_fragmentation_node(state: AgentState) -> dict[str, Any]:
@@ -41,7 +51,17 @@ def min_fragmentation_node(state: AgentState) -> dict[str, Any]:
     2. Call schedule_min_fragmentation(subtasks, free_slots).
     3. Return {"candidate_min_fragmentation": result}.
     """
-    pass  # TODO: implement
+    subtasks = state.get("subtasks")
+    free_slots = state.get("free_slots")
+
+    if not isinstance(subtasks, list) or not isinstance(free_slots, list):
+        raise ValueError(
+            "min_fragmentation_node: missing subtasks/free_slots list in state"
+        )
+
+    return {
+        "candidate_min_fragmentation": schedule_min_fragmentation(subtasks, free_slots)
+    }
 
 
 def energy_aware_node(state: AgentState) -> dict[str, Any]:
@@ -52,4 +72,22 @@ def energy_aware_node(state: AgentState) -> dict[str, Any]:
     2. Call schedule_energy_aware(subtasks, free_slots, work_start).
     3. Return {"candidate_energy_aware": result}.
     """
-    pass  # TODO: implement
+    subtasks = state.get("subtasks")
+    free_slots = state.get("free_slots")
+    work_start_raw = state.get("work_start")
+
+    if not isinstance(subtasks, list) or not isinstance(free_slots, list):
+        raise ValueError("energy_aware_node: missing subtasks/free_slots list in state")
+
+    if not isinstance(work_start_raw, str):
+        raise ValueError(
+            "energy_aware_node: work_start missing or not a HH:MM string"
+        )
+
+    return {
+        "candidate_energy_aware": schedule_energy_aware(
+            subtasks,
+            free_slots,
+            work_start=work_start_raw,
+        )
+    }
