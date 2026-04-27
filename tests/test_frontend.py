@@ -16,14 +16,76 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
+
+from src.frontend import approval_controls
+from src.frontend import intake_form
+from src.frontend import schedule_display
+
+
+@contextmanager
+def _noop_context_manager(*args, **kwargs) -> Iterator[None]:
+    _ = args, kwargs
+    yield
+
+
+class _DummyColumn:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        _ = exc_type, exc, tb
+        return False
+
+
+def _patch_intake_streamlit(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    goal: str,
+    deadline: datetime.date,
+    context: str,
+    work_start: datetime.time,
+    work_end: datetime.time,
+    max_session_minutes: int,
+    submitted: bool,
+) -> list[str]:
+    """Patch Streamlit calls used by render_intake_form and return captured errors."""
+    error_messages: list[str] = []
+
+    monkeypatch.setattr(intake_form.st, "form", _noop_context_manager)
+    monkeypatch.setattr(intake_form.st, "text_input", lambda *args, **kwargs: goal)
+    monkeypatch.setattr(intake_form.st, "date_input", lambda *args, **kwargs: deadline)
+    monkeypatch.setattr(intake_form.st, "text_area", lambda *args, **kwargs: context)
+
+    def _columns(_count: int):
+        return (_DummyColumn(), _DummyColumn())
+
+    monkeypatch.setattr(intake_form.st, "columns", _columns)
+
+    time_values = iter((work_start, work_end))
+    monkeypatch.setattr(intake_form.st, "time_input", lambda *args, **kwargs: next(time_values))
+    monkeypatch.setattr(
+        intake_form.st,
+        "number_input",
+        lambda *args, **kwargs: max_session_minutes,
+    )
+    monkeypatch.setattr(
+        intake_form.st,
+        "form_submit_button",
+        lambda *args, **kwargs: submitted,
+    )
+    monkeypatch.setattr(intake_form.st, "error", lambda message: error_messages.append(message))
+
+    return error_messages
 
 
 class TestIntakeFormValidation:
     """Test the validation rules in render_intake_form."""
 
-    def test_empty_goal_is_rejected(self):
+    def test_empty_goal_is_rejected(self, monkeypatch: pytest.MonkeyPatch):
         """Submitting with an empty goal should fail validation.
 
         STEPS:
@@ -32,34 +94,100 @@ class TestIntakeFormValidation:
         2. Provide an empty string for goal.
         3. Assert that the function returns None or raises an error.
         """
-        pass  # TODO: implement
+        today = datetime.date.today()
+        errors = _patch_intake_streamlit(
+            monkeypatch,
+            goal="   ",
+            deadline=today + datetime.timedelta(days=7),
+            context="context",
+            work_start=datetime.time(9, 0),
+            work_end=datetime.time(18, 0),
+            max_session_minutes=90,
+            submitted=True,
+        )
 
-    def test_past_deadline_is_rejected(self):
+        result = intake_form.render_intake_form()
+
+        assert result is None
+        assert errors == ["Please describe your goal."]
+
+    def test_past_deadline_is_rejected(self, monkeypatch: pytest.MonkeyPatch):
         """A deadline in the past should fail validation.
 
         STEPS:
         1. Set deadline = datetime.date.today() - timedelta(days=1).
         2. Assert validation rejects it.
         """
-        pass  # TODO: implement
+        today = datetime.date.today()
+        errors = _patch_intake_streamlit(
+            monkeypatch,
+            goal="Learn React",
+            deadline=today - datetime.timedelta(days=1),
+            context="context",
+            work_start=datetime.time(9, 0),
+            work_end=datetime.time(18, 0),
+            max_session_minutes=90,
+            submitted=True,
+        )
 
-    def test_invalid_work_hours_rejected(self):
+        result = intake_form.render_intake_form()
+
+        assert result is None
+        assert errors == ["Deadline must be in the future."]
+
+    def test_invalid_work_hours_rejected(self, monkeypatch: pytest.MonkeyPatch):
         """work_start >= work_end should fail validation.
 
         STEPS:
         1. Set work_start = 18:00, work_end = 09:00.
         2. Assert validation rejects it.
         """
-        pass  # TODO: implement
+        today = datetime.date.today()
+        errors = _patch_intake_streamlit(
+            monkeypatch,
+            goal="Learn React",
+            deadline=today + datetime.timedelta(days=7),
+            context="context",
+            work_start=datetime.time(18, 0),
+            work_end=datetime.time(9, 0),
+            max_session_minutes=90,
+            submitted=True,
+        )
 
-    def test_valid_inputs_pass(self):
+        result = intake_form.render_intake_form()
+
+        assert result is None
+        assert errors == ["Work start must be earlier than work end."]
+
+    def test_valid_inputs_pass(self, monkeypatch: pytest.MonkeyPatch):
         """A complete, valid set of inputs should pass.
 
         STEPS:
         1. Provide valid goal, deadline (future), context, hours, session_len.
         2. Assert the returned dict has all expected keys.
         """
-        pass  # TODO: implement
+        today = datetime.date.today()
+        errors = _patch_intake_streamlit(
+            monkeypatch,
+            goal="  Learn React basics  ",
+            deadline=today + datetime.timedelta(days=10),
+            context="  Some context  ",
+            work_start=datetime.time(9, 0),
+            work_end=datetime.time(18, 0),
+            max_session_minutes=120,
+            submitted=True,
+        )
+
+        result = intake_form.render_intake_form()
+
+        assert errors == []
+        assert result is not None
+        assert result["goal"] == "Learn React basics"
+        assert result["context"] == "Some context"
+        assert result["max_session_minutes"] == 120
+        assert result["work_start"] == datetime.time(9, 0)
+        assert result["work_end"] == datetime.time(18, 0)
+        assert isinstance(result["deadline"], datetime.date)
 
 
 class TestScheduleDisplay:
@@ -73,4 +201,42 @@ class TestScheduleDisplay:
         2. Pass sample_valid_schedule.
         3. Assert events are grouped correctly.
         """
-        pass  # TODO: implement
+        grouped = schedule_display._group_events_by_day(sample_valid_schedule)
+
+        assert len(grouped) == 2
+        days = list(grouped.keys())
+        assert days[0].isoformat() == "2026-04-06"
+        assert days[1].isoformat() == "2026-04-07"
+        assert len(grouped[days[0]]) == 2
+        assert len(grouped[days[1]]) == 1
+
+
+class TestApprovalControls:
+    """Test strategy approval/rejection button behavior."""
+
+    def test_identical_candidates_approve(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr(approval_controls.st, "button", lambda *args, **kwargs: True)
+        monkeypatch.setattr(approval_controls.st, "divider", lambda: None)
+
+        action, strategy = approval_controls.render_strategy_buttons(candidates_identical=True)
+
+        assert (action, strategy) == ("approve", "deadline_first")
+
+    def test_reject_all(self, monkeypatch: pytest.MonkeyPatch):
+        button_presses = iter((False, False, False, True))
+
+        monkeypatch.setattr(
+            approval_controls.st,
+            "button",
+            lambda *args, **kwargs: next(button_presses),
+        )
+        monkeypatch.setattr(
+            approval_controls.st,
+            "columns",
+            lambda _count: (_DummyColumn(), _DummyColumn(), _DummyColumn()),
+        )
+        monkeypatch.setattr(approval_controls.st, "divider", lambda: None)
+
+        action, strategy = approval_controls.render_strategy_buttons(candidates_identical=False)
+
+        assert (action, strategy) == ("reject", None)
