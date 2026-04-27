@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any
 
 from src.orchestration.state import Subtask, ProposedEvent
 
@@ -60,4 +59,58 @@ def schedule_energy_aware(
     - All slots are in the morning → schedule everything there.
     - All subtasks are heavy → same as deadline_first within mornings.
     """
-    pass  # TODO: implement
+    parsed_slots: list[tuple[datetime.datetime, datetime.datetime]] = [
+        (
+            datetime.datetime.fromisoformat(slot["start"]),
+            datetime.datetime.fromisoformat(slot["end"]),
+        )
+        for slot in free_slots
+    ]
+    parsed_slots.sort(key=lambda interval: interval[0])
+
+    morning_pool = [slot for slot in parsed_slots if slot[0].time() < _MORNING_END]
+    afternoon_pool = [slot for slot in parsed_slots if slot[0].time() >= _MORNING_END]
+
+    heavy_subtasks = [subtask for subtask in subtasks if subtask["duration_minutes"] >= 60]
+    light_subtasks = [subtask for subtask in subtasks if subtask["duration_minutes"] < 60]
+
+    scheduled: list[ProposedEvent] = []
+
+    def place_in_pool(
+        subtask: Subtask,
+        primary_pool: list[tuple[datetime.datetime, datetime.datetime]],
+        secondary_pool: list[tuple[datetime.datetime, datetime.datetime]],
+    ) -> bool:
+        duration = datetime.timedelta(minutes=subtask["duration_minutes"])
+
+        for pool in (primary_pool, secondary_pool):
+            for idx, (slot_start, slot_end) in enumerate(pool):
+                if slot_end - slot_start < duration:
+                    continue
+
+                event_end = slot_start + duration
+                scheduled.append(
+                    ProposedEvent(
+                        name=subtask["name"],
+                        description=subtask["description"],
+                        start=slot_start.isoformat(),
+                        end=event_end.isoformat(),
+                    )
+                )
+
+                pool.pop(idx)
+                if event_end < slot_end:
+                    pool.append((event_end, slot_end))
+                    pool.sort(key=lambda interval: interval[0])
+                return True
+
+        return False
+
+    for subtask in heavy_subtasks:
+        place_in_pool(subtask, morning_pool, afternoon_pool)
+
+    for subtask in light_subtasks:
+        place_in_pool(subtask, afternoon_pool, morning_pool)
+
+    scheduled.sort(key=lambda event: event["start"])
+    return scheduled
