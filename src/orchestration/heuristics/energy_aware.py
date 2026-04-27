@@ -78,12 +78,21 @@ def schedule_energy_aware(
 
     def place_in_pool(
         subtask: Subtask,
-        primary_pool: list[tuple[datetime.datetime, datetime.datetime]],
-        secondary_pool: list[tuple[datetime.datetime, datetime.datetime]],
+        prefer_morning: bool,
     ) -> bool:
-        duration = datetime.timedelta(minutes=subtask["duration_minutes"])
+        """Place a subtask in the preferred pool, spilling to the other if needed.
 
-        for pool in (primary_pool, secondary_pool):
+        Remainder slots after a split are reclassified into the correct pool
+        based on the remainder's start time, so morning_pool never accumulates
+        slots that actually begin after noon.
+        """
+        duration = datetime.timedelta(minutes=subtask["duration_minutes"])
+        pools = (
+            (morning_pool, afternoon_pool) if prefer_morning
+            else (afternoon_pool, morning_pool)
+        )
+
+        for pool in pools:
             for idx, (slot_start, slot_end) in enumerate(pool):
                 if slot_end - slot_start < duration:
                     continue
@@ -100,17 +109,23 @@ def schedule_energy_aware(
 
                 pool.pop(idx)
                 if event_end < slot_end:
-                    pool.append((event_end, slot_end))
-                    pool.sort(key=lambda interval: interval[0])
+                    # Reclassify remainder into the correct pool by its new start.
+                    remainder = (event_end, slot_end)
+                    if event_end.time() < _MORNING_END:
+                        morning_pool.append(remainder)
+                        morning_pool.sort(key=lambda interval: interval[0])
+                    else:
+                        afternoon_pool.append(remainder)
+                        afternoon_pool.sort(key=lambda interval: interval[0])
                 return True
 
         return False
 
     for subtask in heavy_subtasks:
-        place_in_pool(subtask, morning_pool, afternoon_pool)
+        place_in_pool(subtask, prefer_morning=True)
 
     for subtask in light_subtasks:
-        place_in_pool(subtask, afternoon_pool, morning_pool)
+        place_in_pool(subtask, prefer_morning=False)
 
     scheduled.sort(key=lambda event: event["start"])
     return scheduled
