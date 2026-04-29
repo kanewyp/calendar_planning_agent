@@ -36,7 +36,16 @@ def _init_session_state() -> None:
        - "result"       → None   (final result message to display)
     2. Any additional keys your modules need can be added here.
     """
-    pass  # TODO: implement
+    defaults = {
+      "graph_state": None,
+      "graph": None,
+      "user_inputs": None,
+      "phase": "intake",
+      "result": None,
+    }
+    for key, value in defaults.items():
+      if key not in st.session_state:
+        st.session_state[key] = value
 
 
 def main() -> None:
@@ -78,7 +87,82 @@ def main() -> None:
          a. Display st.session_state["result"] (success or rejection message).
          b. Offer a "Start over" button that resets session state.
     """
-    pass  # TODO: implement
+    st.set_page_config(page_title="Calendar Planning Agent", layout="wide")
+    st.title("Calendar Planning Agent")
+    _init_session_state()
+
+    phase = st.session_state["phase"]
+
+    if phase == "intake":
+      user_inputs = render_intake_form()
+      if user_inputs is not None:
+        st.session_state["user_inputs"] = user_inputs
+        st.session_state["phase"] = "running"
+        st.rerun()
+      return
+
+    if phase == "running":
+      with st.spinner("Agent is planning your schedule..."):
+        graph = build_graph()
+        paused_state = run_graph_until_approval(graph, st.session_state["user_inputs"])
+
+      st.session_state["graph"] = graph
+      st.session_state["graph_state"] = paused_state
+      st.session_state["phase"] = "review"
+      st.rerun()
+      return
+
+    if phase == "review":
+      graph_state = st.session_state.get("graph_state")
+      if not graph_state:
+        st.error("Missing planning state. Please start over.")
+        st.session_state["phase"] = "done"
+        st.session_state["result"] = "Planning state was lost. No calendar changes were made."
+        st.rerun()
+        return
+
+      render_all_candidates(graph_state)
+      action, strategy_name = render_strategy_buttons(
+        graph_state.get("candidates_identical", False)
+      )
+
+      if action == "approve" and strategy_name is not None:
+        graph = st.session_state.get("graph") or build_graph()
+        graph_state["selected_strategy"] = strategy_name
+        final_state = resume_graph(graph, graph_state, approved=True)
+
+        written_count = len(final_state.get("write_results", []))
+        st.session_state["result"] = (
+          f"Schedule approved with strategy '{strategy_name}'. "
+          f"Created {written_count} calendar event(s)."
+        )
+        st.session_state["graph_state"] = final_state
+        st.session_state["phase"] = "done"
+        st.rerun()
+        return
+
+      if action == "reject":
+        graph = st.session_state.get("graph") or build_graph()
+        final_state = resume_graph(graph, graph_state, approved=False)
+
+        st.session_state["result"] = "Schedule rejected. No calendar changes were made."
+        st.session_state["graph_state"] = final_state
+        st.session_state["phase"] = "done"
+        st.rerun()
+        return
+
+      return
+
+    if phase == "done":
+      result_message = st.session_state.get("result")
+      if result_message:
+        st.success(result_message)
+
+      if st.button("Start over", type="primary"):
+        for key in ["graph_state", "graph", "user_inputs", "result"]:
+          st.session_state[key] = None
+        st.session_state["phase"] = "intake"
+        st.rerun()
 
 
 if __name__ == "__main__":

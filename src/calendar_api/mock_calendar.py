@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import datetime
+import uuid
 from typing import Any
 
 
@@ -70,7 +71,25 @@ def fetch_mock_busy_blocks(
     3. Keep only events where start >= time_min and end <= time_max.
     4. Return as [{"start": ..., "end": ...}, ...].
     """
-    pass  # TODO: implement
+    busy_blocks: list[dict[str, str]] = []
+
+    for event in MOCK_EVENTS:
+        event_start = datetime.datetime.fromisoformat(event["start"])
+        event_end = datetime.datetime.fromisoformat(event["end"])
+
+        # Treat any interval overlap as busy in the requested window.
+        if event_end <= time_min or event_start >= time_max:
+            continue
+
+        busy_blocks.append(
+            {
+                "start": event_start.isoformat(),
+                "end": event_end.isoformat(),
+            }
+        )
+
+    busy_blocks.sort(key=lambda block: block["start"])
+    return busy_blocks
 
 
 def create_mock_event(
@@ -86,4 +105,15 @@ def create_mock_event(
     2. Return a dict mimicking the Google API response, e.g.:
        {"id": "<uuid>", "summary": summary, "status": "confirmed", ...}
     """
-    pass  # TODO: implement
+    event_id = str(uuid.uuid4())
+    print(f"[MOCK] Created event: {summary} {start.isoformat()} -> {end.isoformat()}")
+
+    return {
+        "id": event_id,
+        "summary": summary,
+        "description": description,
+        "status": "confirmed",
+        "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+        "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
+        "htmlLink": f"https://mock.calendar/events/{event_id}",
+    }

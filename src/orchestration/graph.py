@@ -52,6 +52,7 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 from langgraph.graph import StateGraph, END
@@ -73,6 +74,13 @@ from src.orchestration.nodes.human_approval import human_approval_node
 from src.orchestration.nodes.write_events import write_events_node
 
 
+STRATEGY_TO_STATE_KEY = {
+    "deadline_first": "candidate_deadline_first",
+    "min_fragmentation": "candidate_min_fragmentation",
+    "energy_aware": "candidate_energy_aware",
+}
+
+
 def _approval_decision(state: AgentState) -> str:
     """Conditional edge after human approval.
 
@@ -81,7 +89,9 @@ def _approval_decision(state: AgentState) -> str:
        → return "write_events".
     2. Otherwise (rejected or no strategy chosen) → return END.
     """
-    pass  # TODO: implement
+    if state.get("user_approved") is True and state.get("selected_strategy"):
+        return "write_events"
+    return END
 
 
 def build_graph() -> StateGraph:
@@ -128,7 +138,46 @@ def build_graph() -> StateGraph:
     - If using an older LangGraph version, run them sequentially
       and refactor to parallel later.
     """
-    pass  # TODO: implement
+    graph = StateGraph(AgentState)
+
+    graph.add_node("decompose_goal", decompose_goal_node)
+    graph.add_node("fetch_events", fetch_events_node)
+    graph.add_node("deadline_first", deadline_first_node)
+    graph.add_node("min_fragmentation", min_fragmentation_node)
+    graph.add_node("energy_aware", energy_aware_node)
+    graph.add_node("validate_candidates", validate_candidates_node)
+    graph.add_node("generate_rationales", generate_rationales_node)
+    graph.add_node("build_proposal", build_proposal_node)
+    graph.add_node("human_approval", human_approval_node)
+    graph.add_node("write_events", write_events_node)
+
+    graph.set_entry_point("decompose_goal")
+
+    graph.add_edge("decompose_goal", "fetch_events")
+
+    graph.add_edge("fetch_events", "deadline_first")
+    graph.add_edge("fetch_events", "min_fragmentation")
+    graph.add_edge("fetch_events", "energy_aware")
+
+    graph.add_edge("deadline_first", "validate_candidates")
+    graph.add_edge("min_fragmentation", "validate_candidates")
+    graph.add_edge("energy_aware", "validate_candidates")
+
+    graph.add_edge("validate_candidates", "generate_rationales")
+    graph.add_edge("generate_rationales", "build_proposal")
+    graph.add_edge("build_proposal", "human_approval")
+
+    graph.add_conditional_edges(
+        "human_approval",
+        _approval_decision,
+        {
+            "write_events": "write_events",
+            END: END,
+        },
+    )
+    graph.add_edge("write_events", END)
+
+    return graph.compile(interrupt_before=["human_approval"])
 
 
 def run_graph_until_approval(
@@ -167,7 +216,55 @@ def run_graph_until_approval(
          their validations, their rationales, and candidates_identical.
     3. Return the paused state.
     """
-    pass  # TODO: implement
+    required_keys = {
+        "goal",
+        "deadline",
+        "work_start",
+        "work_end",
+        "max_session_minutes",
+    }
+    missing = required_keys - set(user_inputs)
+    if missing:
+        raise ValueError(
+            f"run_graph_until_approval missing required user inputs: {sorted(missing)}"
+        )
+
+    deadline_input = user_inputs["deadline"]
+    if isinstance(deadline_input, datetime.date):
+        deadline_value = deadline_input.isoformat()
+    else:
+        deadline_value = str(deadline_input)
+
+    work_start_input = user_inputs["work_start"]
+    if isinstance(work_start_input, datetime.time):
+        work_start_value = work_start_input.strftime("%H:%M")
+    else:
+        work_start_value = str(work_start_input)
+
+    work_end_input = user_inputs["work_end"]
+    if isinstance(work_end_input, datetime.time):
+        work_end_value = work_end_input.strftime("%H:%M")
+    else:
+        work_end_value = str(work_end_input)
+
+    initial_state: AgentState = {
+        "goal": str(user_inputs["goal"]),
+        "deadline": deadline_value,
+        "context": str(user_inputs.get("context", "")),
+        "work_start": work_start_value,
+        "work_end": work_end_value,
+        "max_session_minutes": int(user_inputs["max_session_minutes"]),
+        "selected_strategy": None,
+        "user_approved": None,
+    }
+
+    paused_state = graph.invoke(initial_state)
+    if not isinstance(paused_state, dict):
+        raise RuntimeError(
+            "run_graph_until_approval expected graph.invoke(...) to return a state dict"
+        )
+
+    return paused_state
 
 
 def resume_graph(
@@ -194,4 +291,32 @@ def resume_graph(
     3. Resume graph execution from the human_approval node.
     4. Return the final state.
     """
-    pass  # TODO: implement
+    _ = graph
+    resumed_state: AgentState = dict(paused_state)
+    resumed_state["user_approved"] = approved
+
+    if approved:
+        selected_strategy = resumed_state.get("selected_strategy")
+        if selected_strategy not in STRATEGY_TO_STATE_KEY:
+            raise ValueError(
+                "resume_graph: approved=True but selected_strategy is missing/invalid; "
+                f"got {selected_strategy!r}"
+            )
+
+        strategy_state_key = STRATEGY_TO_STATE_KEY[selected_strategy]
+        if strategy_state_key not in resumed_state:
+            raise ValueError(
+                "resume_graph: selected strategy has no candidate schedule in state; "
+                f"missing key {strategy_state_key!r}"
+            )
+
+        resumed_state["final_schedule"] = resumed_state[strategy_state_key]
+
+    approval_updates = human_approval_node(resumed_state)
+    resumed_state.update(approval_updates)
+
+    if _approval_decision(resumed_state) == "write_events":
+        write_updates = write_events_node(resumed_state)
+        resumed_state.update(write_updates)
+
+    return resumed_state

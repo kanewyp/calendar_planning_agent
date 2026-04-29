@@ -49,4 +49,19 @@ def render_strategy_buttons(candidates_identical: bool = False) -> tuple[str | N
        On click → return ("reject", None).
     4. If no button pressed → return (None, None).
     """
-    pass  # TODO: implement
+    if candidates_identical:
+        if st.button("Approve Schedule", type="primary", use_container_width=True):
+            return ("approve", "deadline_first")
+    else:
+        strategy_columns = st.columns(3)
+        for strategy_name, column in zip(STRATEGY_NAMES, strategy_columns):
+            label = STRATEGY_BUTTON_LABELS[strategy_name]
+            with column:
+                if st.button(label, type="primary", use_container_width=True):
+                    return ("approve", strategy_name)
+
+    st.divider()
+    if st.button("Reject All", use_container_width=True):
+        return ("reject", None)
+
+    return (None, None)
