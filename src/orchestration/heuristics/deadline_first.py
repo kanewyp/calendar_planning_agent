@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any
 
 from src.orchestration.state import Subtask, ProposedEvent
 
@@ -53,4 +52,43 @@ def schedule_deadline_first(
     - Subtask longer than any free slot → place in largest slot (validator
       will flag the overflow).
     """
-    pass  # TODO: implement
+    available_slots: list[tuple[datetime.datetime, datetime.datetime]] = [
+      (
+        datetime.datetime.fromisoformat(slot["start"]),
+        datetime.datetime.fromisoformat(slot["end"]),
+      )
+      for slot in free_slots
+    ]
+    available_slots.sort(key=lambda interval: interval[0])
+
+    scheduled: list[ProposedEvent] = []
+
+    for subtask in subtasks:
+      duration = datetime.timedelta(minutes=subtask["duration_minutes"])
+      chosen_idx: int | None = None
+
+      for idx, (slot_start, slot_end) in enumerate(available_slots):
+        if slot_end - slot_start >= duration:
+          chosen_idx = idx
+          break
+
+      if chosen_idx is None:
+        continue
+
+      slot_start, slot_end = available_slots.pop(chosen_idx)
+      event_end = slot_start + duration
+
+      scheduled.append(
+        ProposedEvent(
+          name=subtask["name"],
+          description=subtask["description"],
+          start=slot_start.isoformat(),
+          end=event_end.isoformat(),
+        )
+      )
+
+      if event_end < slot_end:
+        available_slots.append((event_end, slot_end))
+        available_slots.sort(key=lambda interval: interval[0])
+
+    return scheduled

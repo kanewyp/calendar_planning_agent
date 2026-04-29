@@ -21,6 +21,9 @@ import pytest
 
 from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.decompose_goal import decompose_goal_node
+from src.orchestration.heuristics.deadline_first import schedule_deadline_first
+from src.orchestration.heuristics.minimize_fragmentation import schedule_min_fragmentation
+from src.orchestration.heuristics.energy_aware import schedule_energy_aware
 
 
 class TestDecomposeGoalNode:
@@ -142,7 +145,14 @@ class TestDeadlineFirstHeuristic:
            free slot.
         3. Assert all subtasks are scheduled (if enough time exists).
         """
-        pass  # TODO: implement
+        events = schedule_deadline_first(sample_subtasks, sample_free_slots)
+
+        assert len(events) == len(sample_subtasks)
+        assert events[0]["start"] == sample_free_slots[0]["start"]
+        assert events[0]["name"] == sample_subtasks[0]["name"]
+        # Output is chronologically ordered
+        starts = [e["start"] for e in events]
+        assert starts == sorted(starts)
 
     def test_slot_splitting(self, sample_free_slots):
         """A short subtask should split a long free slot, leaving the remainder.
@@ -152,7 +162,19 @@ class TestDeadlineFirstHeuristic:
         2. Assert the subtask occupies only the first 30 min.
         3. Ideally verify remaining slot is still available for next subtask.
         """
-        pass  # TODO: implement
+        subtasks = [
+            {"name": "Short task",  "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        big_slot = [{"start": "2026-04-06T10:00:00+00:00", "end": "2026-04-06T14:00:00+00:00"}]
+        events = schedule_deadline_first(subtasks, big_slot)
+
+        assert len(events) == 2
+        assert events[0]["start"] == "2026-04-06T10:00:00+00:00"
+        assert events[0]["end"]   == "2026-04-06T10:30:00+00:00"
+        # Remainder used for second task
+        assert events[1]["start"] == "2026-04-06T10:30:00+00:00"
+        assert events[1]["end"]   == "2026-04-06T11:00:00+00:00"
 
 
 class TestMinFragmentationHeuristic:
@@ -169,7 +191,22 @@ class TestMinFragmentationHeuristic:
         3. Assert the longest subtask was placed in (or at the start of)
            the largest slot.
         """
-        pass  # TODO: implement
+        events = schedule_min_fragmentation(sample_subtasks, sample_free_slots)
+
+        assert len(events) == len(sample_subtasks)
+        longest_subtask = max(sample_subtasks, key=lambda s: s["duration_minutes"])
+        largest_slot = max(
+            sample_free_slots,
+            key=lambda sl: (
+                datetime.datetime.fromisoformat(sl["end"]) -
+                datetime.datetime.fromisoformat(sl["start"])
+            ),
+        )
+        longest_event = next(e for e in events if e["name"] == longest_subtask["name"])
+        assert longest_event["start"] == largest_slot["start"]
+        # Output is chronologically ordered
+        starts = [e["start"] for e in events]
+        assert starts == sorted(starts)
 
 
 class TestEnergyAwareHeuristic:
@@ -183,7 +220,17 @@ class TestEnergyAwareHeuristic:
         2. Identify events with duration >= 60 min.
         3. Assert their start times are before 12:00.
         """
-        pass  # TODO: implement
+        events = schedule_energy_aware(sample_subtasks, sample_free_slots)
+        heavy_names = {
+            s["name"] for s in sample_subtasks if s["duration_minutes"] >= 60
+        }
+        morning_boundary = datetime.time(12, 0)
+        for event in events:
+            if event["name"] in heavy_names:
+                start_time = datetime.datetime.fromisoformat(event["start"]).time()
+                assert start_time < morning_boundary, (
+                    f"Heavy task '{event['name']}' placed after noon at {start_time}"
+                )
 
     def test_light_tasks_in_afternoon(self, sample_subtasks, sample_free_slots):
         """Subtasks < 60 min should be placed in afternoon slots when possible.
@@ -191,7 +238,18 @@ class TestEnergyAwareHeuristic:
         STEPS:
         1. Same as above, but check that short tasks start after 12:00.
         """
-        pass  # TODO: implement
+        # sample_subtasks has one light task: 'Set up dev environment' (30 min)
+        events = schedule_energy_aware(sample_subtasks, sample_free_slots)
+        light_names = {
+            s["name"] for s in sample_subtasks if s["duration_minutes"] < 60
+        }
+        morning_boundary = datetime.time(12, 0)
+        for event in events:
+            if event["name"] in light_names:
+                start_time = datetime.datetime.fromisoformat(event["start"]).time()
+                assert start_time >= morning_boundary, (
+                    f"Light task '{event['name']}' placed in morning at {start_time}"
+                )
 
 
 class TestValidateCandidates:

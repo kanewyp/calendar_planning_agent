@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any
 
 from src.orchestration.state import Subtask, ProposedEvent
 
@@ -60,4 +59,73 @@ def schedule_energy_aware(
     - All slots are in the morning → schedule everything there.
     - All subtasks are heavy → same as deadline_first within mornings.
     """
-    pass  # TODO: implement
+    parsed_slots: list[tuple[datetime.datetime, datetime.datetime]] = [
+        (
+            datetime.datetime.fromisoformat(slot["start"]),
+            datetime.datetime.fromisoformat(slot["end"]),
+        )
+        for slot in free_slots
+    ]
+    parsed_slots.sort(key=lambda interval: interval[0])
+
+    morning_pool = [slot for slot in parsed_slots if slot[0].time() < _MORNING_END]
+    afternoon_pool = [slot for slot in parsed_slots if slot[0].time() >= _MORNING_END]
+
+    heavy_subtasks = [subtask for subtask in subtasks if subtask["duration_minutes"] >= 60]
+    light_subtasks = [subtask for subtask in subtasks if subtask["duration_minutes"] < 60]
+
+    scheduled: list[ProposedEvent] = []
+
+    def place_in_pool(
+        subtask: Subtask,
+        prefer_morning: bool,
+    ) -> bool:
+        """Place a subtask in the preferred pool, spilling to the other if needed.
+
+        Remainder slots after a split are reclassified into the correct pool
+        based on the remainder's start time, so morning_pool never accumulates
+        slots that actually begin after noon.
+        """
+        duration = datetime.timedelta(minutes=subtask["duration_minutes"])
+        pools = (
+            (morning_pool, afternoon_pool) if prefer_morning
+            else (afternoon_pool, morning_pool)
+        )
+
+        for pool in pools:
+            for idx, (slot_start, slot_end) in enumerate(pool):
+                if slot_end - slot_start < duration:
+                    continue
+
+                event_end = slot_start + duration
+                scheduled.append(
+                    ProposedEvent(
+                        name=subtask["name"],
+                        description=subtask["description"],
+                        start=slot_start.isoformat(),
+                        end=event_end.isoformat(),
+                    )
+                )
+
+                pool.pop(idx)
+                if event_end < slot_end:
+                    # Reclassify remainder into the correct pool by its new start.
+                    remainder = (event_end, slot_end)
+                    if event_end.time() < _MORNING_END:
+                        morning_pool.append(remainder)
+                        morning_pool.sort(key=lambda interval: interval[0])
+                    else:
+                        afternoon_pool.append(remainder)
+                        afternoon_pool.sort(key=lambda interval: interval[0])
+                return True
+
+        return False
+
+    for subtask in heavy_subtasks:
+        place_in_pool(subtask, prefer_morning=True)
+
+    for subtask in light_subtasks:
+        place_in_pool(subtask, prefer_morning=False)
+
+    scheduled.sort(key=lambda event: event["start"])
+    return scheduled

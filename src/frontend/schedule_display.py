@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
 import streamlit as st
@@ -32,6 +33,32 @@ STRATEGY_STATE_KEYS = {
 }
 
 
+def _parse_iso_datetime(value: str) -> datetime.datetime:
+    """Parse ISO datetime values from state, including trailing Z format."""
+    normalized = value.replace("Z", "+00:00")
+    return datetime.datetime.fromisoformat(normalized)
+
+
+def _group_events_by_day(
+    schedule: list[dict[str, Any]],
+) -> dict[datetime.date, list[tuple[datetime.datetime, datetime.datetime, dict[str, Any]]]]:
+    """Group events by calendar date, sorted by start time."""
+    grouped: dict[
+        datetime.date,
+        list[tuple[datetime.datetime, datetime.datetime, dict[str, Any]]],
+    ] = {}
+
+    for event in schedule:
+        start_dt = _parse_iso_datetime(event["start"])
+        end_dt = _parse_iso_datetime(event["end"])
+        grouped.setdefault(start_dt.date(), []).append((start_dt, end_dt, event))
+
+    for events in grouped.values():
+        events.sort(key=lambda item: item[0])
+
+    return dict(sorted(grouped.items(), key=lambda item: item[0]))
+
+
 def render_all_candidates(state: AgentState) -> None:
     """Display all three strategy options for the user to compare.
 
@@ -49,7 +76,30 @@ def render_all_candidates(state: AgentState) -> None:
           - Call render_single_schedule(candidate) for the event table.
           - Render the rationale with st.info().
     """
-    pass  # TODO: implement
+    if state.get("candidates_identical", False):
+        render_collapsed_view(state)
+        return
+
+    validations = state.get("candidate_validations", {})
+    rationales = state.get("candidate_rationales", {})
+    columns = st.columns(3)
+
+    for strategy_name, column in zip(STRATEGY_LABELS, columns):
+        title, subtitle = STRATEGY_LABELS[strategy_name]
+        candidate_key = STRATEGY_STATE_KEYS[strategy_name]
+        candidate = state.get(candidate_key, [])
+        validation = validations.get(
+            strategy_name,
+            ValidationResult(passed=True, violations=[]),
+        )
+        rationale = rationales.get(strategy_name, "No rationale available yet.")
+
+        with column:
+            st.subheader(title)
+            st.caption(subtitle)
+            render_violation_badge(validation)
+            render_single_schedule(candidate)
+            st.info(rationale)
 
 
 def render_single_schedule(schedule: list[dict[str, Any]]) -> None:
@@ -64,7 +114,26 @@ def render_single_schedule(schedule: list[dict[str, Any]]) -> None:
     2. Group events by date for readability.
     3. Render with st.dataframe() or iterate with st.write() for cards.
     """
-    pass  # TODO: implement
+    if not schedule:
+        st.caption("No events scheduled.")
+        return
+
+    st.caption(f"{len(schedule)} event(s)")
+    grouped_by_day = _group_events_by_day(schedule)
+    for day, events in grouped_by_day.items():
+        st.markdown(f"**{day.strftime('%a, %b %d')}**")
+        for start_dt, end_dt, event in events:
+            time_range = f"{start_dt.strftime('%H:%M')}–{end_dt.strftime('%H:%M')}"
+            description = event.get("description", "")
+            title = event.get("name", "Untitled task")
+
+            if description:
+                st.write(f"- {time_range}  {title}")
+                st.caption(description)
+            else:
+                st.write(f"- {time_range}  {title}")
+
+        st.divider()
 
 
 def render_collapsed_view(state: AgentState) -> None:
@@ -77,7 +146,20 @@ def render_collapsed_view(state: AgentState) -> None:
     3. Show the rationale from any strategy (they'll be similar).
     4. Show violations if any.
     """
-    pass  # TODO: implement
+    st.info("All three strategies produced the same schedule.")
+
+    candidate = state.get("candidate_deadline_first", [])
+    render_single_schedule(candidate)
+
+    validation = state.get("candidate_validations", {}).get(
+        "deadline_first",
+        ValidationResult(passed=True, violations=[]),
+    )
+    render_violation_badge(validation)
+
+    rationale = state.get("candidate_rationales", {}).get("deadline_first")
+    if rationale:
+        st.info(rationale)
 
 
 def render_violation_badge(validation: ValidationResult) -> None:
@@ -88,4 +170,15 @@ def render_violation_badge(validation: ValidationResult) -> None:
     2. Else → st.error(f"{len(validation['violations'])} conflict(s)").
     3. Optionally expand to show violation details in an st.expander.
     """
-    pass  # TODO: implement
+    if validation["passed"]:
+        st.success("No conflicts")
+        return
+
+    violations = validation.get("violations", [])
+    st.error(f"{len(violations)} conflict(s)")
+    with st.expander("View conflict details"):
+        for violation in violations:
+            event_name = violation.get("event_name", "Unknown event")
+            violation_type = violation.get("violation_type", "UNKNOWN")
+            description = violation.get("description", "")
+            st.write(f"- {event_name} [{violation_type}]: {description}")
