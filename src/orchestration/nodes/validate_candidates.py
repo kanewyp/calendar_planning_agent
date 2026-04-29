@@ -21,29 +21,29 @@ from src.validator.constraints import validate_schedule
 
 
 def validate_candidates_node(state: AgentState) -> dict[str, Any]:
-    """LangGraph node: validate all three candidates, store results per-strategy.
+   """LangGraph node: validate all three candidates, store results per-strategy.
 
-    STEPS:
-    1. Build the validation inputs from state:
-       - busy_blocks  = state["busy_blocks"]
-       - work_start   = parse state["work_start"]
-       - work_end     = parse state["work_end"]
-       - deadline_dt  = parse state["deadline"]
+   STEPS:
+   1. Build the validation inputs from state:
+      - busy_blocks  = state["busy_blocks"]
+      - work_start   = parse state["work_start"]
+      - work_end     = parse state["work_end"]
+      - deadline_dt  = parse state["deadline"]
 
-    2. For each (strategy_name, candidate) pair:
-       - "deadline_first"      → state["candidate_deadline_first"]
-       - "min_fragmentation"   → state["candidate_min_fragmentation"]
-       - "energy_aware"        → state["candidate_energy_aware"]
-       Run validate_schedule(candidate, busy_blocks, work_start, work_end, deadline_dt).
+   2. For each (strategy_name, candidate) pair:
+      - "deadline_first"      → state["candidate_deadline_first"]
+      - "min_fragmentation"   → state["candidate_min_fragmentation"]
+      - "energy_aware"        → state["candidate_energy_aware"]
+      Run validate_schedule(candidate, busy_blocks, work_start, work_end, deadline_dt).
 
-    3. Return {
-           "candidate_validations": {
-               "deadline_first": result_1,
-               "min_fragmentation": result_2,
-               "energy_aware": result_3,
-           }
-       }
-    """
+   3. Return {
+         "candidate_validations": {
+            "deadline_first": result_1,
+            "min_fragmentation": result_2,
+            "energy_aware": result_3,
+         }
+      }
+   """
    required = {
       "busy_blocks",
       "work_start",
