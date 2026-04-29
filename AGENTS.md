@@ -1,8 +1,8 @@
-# CLAUDE.md
+# AGENTS.md
 
 ## Project Overview
 
-Calendar Planning Agent -- a Streamlit app that takes a natural-language goal, decomposes it into subtasks via Claude (Anthropic LLM), finds free time on Google Calendar, schedules subtasks across available slots using three heuristics, validates each against hard constraints, and presents all three options to the user. The user picks a strategy (or rejects all), and approved events are written to the calendar. Built on LangGraph for orchestration.
+Calendar Planning Agent -- a Streamlit app that takes a natural-language goal, decomposes it into subtasks via Codex (Anthropic LLM), finds free time on Google Calendar, schedules subtasks across available slots using three heuristics, validates each against hard constraints, and presents all three options to the user. The user picks a strategy (or rejects all), and approved events are written to the calendar. Built on LangGraph for orchestration.
 
 **Status:** Skeleton/scaffold. Most functions have `pass # TODO: implement` bodies with detailed step-by-step comments. All test bodies are also stubs.
 
@@ -11,7 +11,7 @@ Calendar Planning Agent -- a Streamlit app that takes a natural-language goal, d
 - **Python 3.11+** (required)
 - **Streamlit** -- frontend UI (intake form, schedule display, approval buttons)
 - **LangGraph / LangChain Core** -- directed graph orchestration with human-in-the-loop pause
-- **Anthropic SDK** -- LLM calls via `claude-sonnet-4-20250514`
+- **Anthropic SDK** -- LLM calls via `Codex-sonnet-4-20250514`
 - **Google Calendar API** -- OAuth 2.0 for event read/create (add-only, never update/delete)
 - **Pydantic** -- validation
 - **python-dotenv** -- env var loading
