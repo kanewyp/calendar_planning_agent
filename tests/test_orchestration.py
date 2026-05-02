@@ -21,6 +21,7 @@ import pytest
 
 from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.decompose_goal import decompose_goal_node
+from src.orchestration.nodes.validate_candidates import validate_candidates_node
 from src.orchestration.heuristics.deadline_first import schedule_deadline_first
 from src.orchestration.heuristics.minimize_fragmentation import schedule_min_fragmentation
 from src.orchestration.heuristics.energy_aware import schedule_energy_aware
@@ -263,7 +264,56 @@ class TestValidateCandidates:
         2. Run validate_candidates_node.
         3. Assert candidate_validations has entries for all three strategies.
         """
-        pass  # TODO: implement
+        clean_candidate = [
+            {
+                "name": "Read React docs",
+                "description": "Official docs",
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            }
+        ]
+        overlapping_candidate = [
+            {
+                "name": "Overlap standup",
+                "description": "Conflicts with existing meeting",
+                "start": "2026-04-06T09:15:00+00:00",
+                "end": "2026-04-06T09:45:00+00:00",
+            }
+        ]
+        late_candidate = [
+            {
+                "name": "Late work",
+                "description": "Past deadline",
+                "start": "2026-04-17T17:00:00+00:00",
+                "end": "2026-04-17T19:00:00+00:00",
+            }
+        ]
+        state = {
+            "busy_blocks": [
+                {
+                    "start": "2026-04-06T09:30:00+00:00",
+                    "end": "2026-04-06T10:00:00+00:00",
+                }
+            ],
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "deadline": "2026-04-17T18:00:00+00:00",
+            "candidate_deadline_first": clean_candidate,
+            "candidate_min_fragmentation": overlapping_candidate,
+            "candidate_energy_aware": late_candidate,
+        }
+
+        result = validate_candidates_node(state)
+
+        validations = result["candidate_validations"]
+        assert set(validations) == {
+            "deadline_first",
+            "min_fragmentation",
+            "energy_aware",
+        }
+        assert validations["deadline_first"]["passed"] is True
+        assert validations["min_fragmentation"]["passed"] is False
+        assert validations["energy_aware"]["passed"] is False
 
     def test_clean_candidate_passes(self):
         """A candidate with no constraint violations should pass validation.
@@ -273,7 +323,29 @@ class TestValidateCandidates:
         2. Run validate_candidates_node.
         3. Assert passed=True and violations is empty.
         """
-        pass  # TODO: implement
+        candidate = [
+            {
+                "name": "Read React docs",
+                "description": "Official docs",
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            }
+        ]
+        state = {
+            "busy_blocks": [],
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "deadline": "2026-04-17",
+            "candidate_deadline_first": candidate,
+            "candidate_min_fragmentation": list(candidate),
+            "candidate_energy_aware": list(candidate),
+        }
+
+        result = validate_candidates_node(state)
+
+        for validation in result["candidate_validations"].values():
+            assert validation["passed"] is True
+            assert validation["violations"] == []
 
 
 class TestBuildProposal:

@@ -30,24 +30,19 @@ Current result:
 46 passed
 ```
 
-Important caveat: the green suite is not full coverage yet. These areas still contain no-op `pass # TODO` tests:
-
-- `tests/test_validator.py`
-- `tests/test_calendar_api.py`
-- `tests/test_orchestration.py::TestValidateCandidates`
+The previous no-op `pass # TODO` tests in `tests/test_validator.py`,
+`tests/test_calendar_api.py`, and
+`tests/test_orchestration.py::TestValidateCandidates` have been replaced with
+assertive unit tests.
 
 ## Known Gaps
 
-- Replace the remaining no-op tests listed above.
 - Run and record a full `CALENDAR_MODE=mock` Streamlit walkthrough:
   - intake form submit
   - candidate generation display
   - approve path writes mock events
   - reject path exits with no writes
 - Verify live Google Calendar mode with real OAuth credentials, or explicitly defer it.
-- Reconcile dependency metadata:
-  - `requirements.txt` targets LangGraph 1.x / LangChain Core 0.3.x
-  - `pyproject.toml` still lists LangGraph `<1.0` / LangChain Core 0.2.x
 - Decide whether to keep or refactor the approval/resume contract.
 
 ## Approval Contract
