@@ -1,14 +1,14 @@
 # Will's Implementation Status
 
-Live checklist of Will's work on the Calendar Planning Agent. Updated each session.
+Live checklist of Will's work on the Calendar Planning Agent. Updated against the current integration branch.
 
 **Legend**
-- ✅ complete — implemented and committed on the branch named for that phase; local logic is in place, though later graph/app integration may still be pending unless explicitly noted
-- 🟡 partial — locally implemented against interface, but still blocked by partner code, unsettled contract, or a known unexercised dependency path
+- ✅ complete — implemented and present on the current integration branch
+- 🟡 partial — implemented, but still needs end-to-end validation, stronger tests, or contract cleanup
 - ⏳ not started — blocked or queued
 - 🚧 in progress
 
-**Labeling rule:** Use ✅ for branch-level implementation progress, not for final end-to-end readiness. Keep a step at 🟡 when a partner-owned stub, unresolved caller contract, or other known dependency means the implementation cannot yet be relied on in the real flow.
+**Labeling rule:** Use ✅ for implementation that exists in source on the current branch. Use 🟡 when the code exists but the real app flow, live dependency, or test coverage still needs verification.
 
 ---
 
@@ -17,9 +17,11 @@ Live checklist of Will's work on the Calendar Planning Agent. Updated each sessi
 | Branch | Pushed? | Tip commit | PR? |
 |--------|---------|-----------|-----|
 | `feature/phase1-foundations` | ✅ on `origin` | `8798297` | not yet opened |
-| `feature/phase2-nodes-unblocked` | ✅ on `origin` (tracks `origin/...`) | `c255a1e` | not yet opened |
+| `feature/phase2-nodes-unblocked` | ✅ on `origin`; local branch has later docs-only commit | origin tip `f77d139`, local tip `16557ac` | not yet opened |
+| `integration/phase2-with-partner` | ✅ on `origin` | `a240854` | integration branch |
+| `docs/sync-project-status` | local docs branch | branched from `integration/phase2-with-partner` | current documentation sync work |
 
-`feature/phase2-nodes-unblocked` is branched from `feature/phase1-foundations`, so its history includes all Phase 1 commits.
+The current working baseline is the integration branch, which includes Will's Phase 1/2 work plus Kane's partner logic/frontend work.
 
 ---
 
@@ -40,51 +42,56 @@ Live checklist of Will's work on the Calendar Planning Agent. Updated each sessi
 | Step | Scope | Status | Commit |
 |------|-------|--------|--------|
 | 6 | `decompose_goal_node` (strict fail-fast) | ✅ | `97864bf` + `ebb78f0` |
-| 7 | `fetch_events_node` | ⏳ | blocked — see partner deps below |
-| 8a | `schedule_candidates` (3 wrappers) | ⏳ | blocked — see partner deps below |
-| 8b | `validate_candidates_node` | ⏳ | blocked — see partner deps below |
+| 7 | `fetch_events_node` | ✅ | implemented via partner integration commit `a3fd77a`; indentation fix in `6cb7409` |
+| 8a | `schedule_candidates` (3 wrappers) | ✅ | implemented via partner integration commit `a3fd77a` |
+| 8b | `validate_candidates_node` | ✅ | implemented via partner integration commit `a3fd77a`; indentation fix in `6cb7409` |
 | 9a | `generate_rationales_node` | ✅ | `e22051b` |
 | 9b | `build_proposal_node` | ✅ | `1d1c699` |
-| 11a | `human_approval_node` | 🟡 | `cf99f5e` — locally implemented, but **public contract unsettled**: node expects `selected_strategy` on state, while `resume_graph(approved: bool)` in `graph.py` does not yet plumb it through |
-| 11b | `write_events_node` | 🟡 | `c255a1e` — mock branch calls partner stub `create_mock_event` (still `pass` at `src/calendar_api/mock_calendar.py:89`); live branch compiles but is not exercisable without google deps installed |
+| 11a | `human_approval_node` | ✅ | `cf99f5e`; app currently sets `selected_strategy` on paused state before calling `resume_graph` |
+| 11b | `write_events_node` | 🟡 | `c255a1e`; mock path now has a real `create_mock_event`, live path still needs real Google credential verification |
 
 ---
 
-## Phase 3 — Graph Wiring (not yet started)
+## Phase 3 — Graph Wiring
 
 | Step | Scope | Status | Notes |
 |------|-------|--------|-------|
-| 10 | `graph.py` — `StateGraph` build, `run_graph_until_approval`, `resume_graph`, `_approval_decision`, `MemorySaver`, `interrupt_before=["human_approval"]` | ⏳ | Will-internal and not blocked on coding, but not started on this branch yet. Will likely force the Step 12 contract decision. |
-| 12 | **Contract settlement** — `resume_graph(approved, selected_strategy)` signature + how `app.py` mutates `paused_state` | ⏳ | unblocks promotion of 11a from 🟡 → ✅ |
+| 10 | `graph.py` — `StateGraph` build, `run_graph_until_approval`, `resume_graph`, `_approval_decision`, `interrupt_before=["human_approval"]` | ✅ | implemented in `a49623f`; helper `resume_graph` executes approval/write path directly from the paused state |
+| 12 | **Approval contract** — selected strategy + resume flow | 🟡 | implemented as app-owned state mutation: `app.py` sets `graph_state["selected_strategy"]`, then calls `resume_graph(graph, graph_state, approved=True)`. This works in code but should be documented as the canonical contract or refactored to pass `selected_strategy` explicitly. |
 
 ---
 
-## Partner Dependencies (what Will is waiting on)
+## Partner Dependencies
 
-These are the exact files / lines my code calls into. Each is currently `pass  # TODO: implement`.
+These dependencies are no longer source-code stubs on the current integration branch.
 
 | Caller (Will) | Calls into (Partner) | File:line |
 |---------------|----------------------|-----------|
-| Step 7 `fetch_events_node` | `compute_free_slots` | `src/calendar_api/free_slots.py:62` |
-| Step 7 `fetch_events_node` (mock mode) | `fetch_mock_busy_blocks` | `src/calendar_api/mock_calendar.py:73` |
-| Step 8a `schedule_candidates` | `schedule_deadline_first` | `src/orchestration/heuristics/deadline_first.py:56` |
-| Step 8a `schedule_candidates` | `schedule_min_fragmentation` | `src/orchestration/heuristics/minimize_fragmentation.py:51` |
-| Step 8a `schedule_candidates` | `schedule_energy_aware` | `src/orchestration/heuristics/energy_aware.py:63` |
-| Step 8b `validate_candidates_node` | `validate_schedule` | `src/validator/constraints.py:89` |
-| Step 11b `write_events_node` (mock mode) | `create_mock_event` | `src/calendar_api/mock_calendar.py:89` |
+| Step 7 `fetch_events_node` | `compute_free_slots` | implemented in `src/calendar_api/free_slots.py` |
+| Step 7 `fetch_events_node` (mock mode) | `fetch_mock_busy_blocks` | implemented in `src/calendar_api/mock_calendar.py` |
+| Step 8a `schedule_candidates` | `schedule_deadline_first` | implemented in `src/orchestration/heuristics/deadline_first.py` |
+| Step 8a `schedule_candidates` | `schedule_min_fragmentation` | implemented in `src/orchestration/heuristics/minimize_fragmentation.py` |
+| Step 8a `schedule_candidates` | `schedule_energy_aware` | implemented in `src/orchestration/heuristics/energy_aware.py` |
+| Step 8b `validate_candidates_node` | `validate_schedule` | implemented in `src/validator/constraints.py` |
+| Step 11b `write_events_node` (mock mode) | `create_mock_event` | implemented in `src/calendar_api/mock_calendar.py` |
 
-(Partner also owns `frontend/intake_form.py` and `frontend/schedule_display.py`, which don't block any of Will's nodes but do block end-to-end app testing.)
-
----
-
-## Environment Caveat
-
-No project `.venv` set up yet locally; `google-auth-oauthlib` and `google-api-python-client` are not in the global Python used for ad hoc test runs. Live-mode tests of Steps 4, 5, 11b cannot run end-to-end until that's resolved. LLM-client tests (Step 3) and targeted node tests currently pass in the global Python environment.
+Partner also implemented `frontend/intake_form.py`, `frontend/schedule_display.py`, `frontend/approval_controls.py`, and the Streamlit app session flow in `src/app.py`.
 
 ---
 
-## Next Concrete Actions (Will's side)
+## Environment / Verification Caveats
 
-1. **Open Phase 1 PR** — all 5 commits are on `origin/feature/phase1-foundations`, no partner dependency.
-2. **Start Step 10** — graph wiring against deliberate stub nodes for partner-owned pieces. Forces the Step 12 contract decision and unblocks promoting 11a.
-3. **Hold Phase 2 PR** until Steps 7, 8 land or until a clear "Will-only Phase 2" PR scope is agreed.
+- The project `.venv` exists and `.venv/bin/pytest -q` currently reports `46 passed`.
+- Some passing tests are still no-op stubs, especially validator/calendar API tests and `TestValidateCandidates`, so coverage is incomplete even though the suite is green.
+- Live Google Calendar behavior still needs real OAuth credential verification.
+- A full `CALENDAR_MODE=mock` Streamlit walkthrough should still be run and recorded.
+
+---
+
+## Next Concrete Actions
+
+1. Document the approval/resume contract as canonical or refactor `resume_graph` to accept `selected_strategy` explicitly.
+2. Replace no-op tests in `tests/test_validator.py`, `tests/test_calendar_api.py`, and `tests/test_orchestration.py::TestValidateCandidates`.
+3. Run a full mock-mode Streamlit walkthrough and record approve/reject outcomes.
+4. Decide whether live Google Calendar verification is required before merging to `main`.
+5. Reconcile dependency metadata between `requirements.txt` and `pyproject.toml`.

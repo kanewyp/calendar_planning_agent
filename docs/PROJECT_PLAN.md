@@ -2,17 +2,20 @@
 
 **Date:** 2026-04-17
 **Team:** 2 developers
-**Status:** Skeleton/scaffold -- all function bodies are stubs with `pass # TODO: implement`
+**Status:** Original implementation plan, now partially historical. The current integration branch has implemented the core application flow for mock-mode development.
 
 ---
 
 ## Current State
 
-Only two files are fully implemented:
-- `config/settings.py` -- Settings singleton, reads `.env`
-- `src/orchestration/state.py` -- All TypedDicts (AgentState, Subtask, ProposedEvent, Violation, ValidationResult)
+As of the current integration branch:
+- Core source modules are implemented: settings, state types, LLM client, Google Calendar auth/events wrappers, free-slot computation, mock calendar, validator, three scheduling heuristics, graph nodes, graph wiring helpers, frontend components, approval controls, and `src/app.py`.
+- The local suite reports `46 passed` with `.venv/bin/pytest -q`.
+- Some tests still contain no-op `pass # TODO` bodies, especially `tests/test_validator.py`, `tests/test_calendar_api.py`, and `tests/test_orchestration.py::TestValidateCandidates`; the green suite should not be treated as complete coverage yet.
+- End-to-end `CALENDAR_MODE=mock` Streamlit walkthrough and live Google Calendar verification are still pending.
+- `requirements.txt` and `pyproject.toml` currently disagree on LangGraph/LangChain version ranges and should be reconciled.
 
-Everything else (40+ files across `src/` and `tests/`) contains stubs with detailed step-by-step comments guiding implementation.
+This document still records the intended two-person implementation order. For current owner-specific status, see `docs/WILL_STATUS.md` and `docs/KANE_STATUS.md`.
 
 ---
 
@@ -32,6 +35,8 @@ Everything else (40+ files across `src/` and `tests/`) contains stubs with detai
 
 **Goal:** Build the foundational functions that the graph nodes will call. Both developers work independently.
 
+**Current status:** Implemented on the integration branch. Remaining work is mostly stronger tests and live-mode verification.
+
 ### Will (Person A) -- LLM Client & Calendar API
 
 | # | File | Functions | Notes |
@@ -39,7 +44,7 @@ Everything else (40+ files across `src/` and `tests/`) contains stubs with detai
 | 1 | `src/llm_client/client.py` | `_build_client()`, `_call_anthropic()`, `call_llm_json()`, `call_llm_text()` | Retry logic (up to 2), JSON parse, uses `claude-sonnet-4-20250514` |
 | 2 | `src/calendar_api/auth.py` | `get_credentials()`, `build_calendar_service()` | Google OAuth 2.0, token caching at `token.json` |
 | 3 | `src/calendar_api/events.py` | `fetch_busy_blocks()`, `create_event()`, `create_events_batch()` | ADD-ONLY -- never update/delete. Prefix descriptions with `[CALENDAR_AGENT]` |
-| 4 | `tests/test_llm_client.py` | All tests | Mock `_call_anthropic`, never hit real API |
+| 4 | `tests/test_llm_client.py` | LLM client tests | Mock `_call_anthropic`, never hit real API |
 
 ### Partner (Person B) -- Validator, Free Slots, Heuristics
 
@@ -51,13 +56,13 @@ Everything else (40+ files across `src/` and `tests/`) contains stubs with detai
 | 4 | `src/orchestration/heuristics/deadline_first.py` | `schedule_deadline_first()` | Greedy earliest-slot assignment |
 | 5 | `src/orchestration/heuristics/minimize_fragmentation.py` | `schedule_min_fragmentation()` | Largest-slot-first |
 | 6 | `src/orchestration/heuristics/energy_aware.py` | `schedule_energy_aware()` | Heavy tasks morning, light tasks afternoon |
-| 7 | `tests/test_validator.py` | All tests | Use fixtures from `conftest.py` |
-| 8 | `tests/test_calendar_api.py` | All tests | Use mock calendar, never real Google API |
+| 7 | `tests/test_validator.py` | Validator tests | Still contains no-op stubs; needs completion |
+| 8 | `tests/test_calendar_api.py` | Calendar/free-slot tests | Still contains no-op stubs; needs completion |
 | 9 | `tests/test_orchestration.py` | Heuristic tests only | `TestDeadlineFirstHeuristic`, `TestMinFragmentationHeuristic`, `TestEnergyAwareHeuristic` |
 
 ### Integration Point
 
-Agree on function signatures early (they're already defined in the stubs):
+Function signatures are now implemented and used by graph nodes:
 - Heuristics: `schedule_*(subtasks, free_slots, ...) -> list[ProposedEvent]`
 - Validator: `validate_schedule(schedule, busy_blocks, work_start, work_end, deadline) -> ValidationResult`
 - Free slots: `compute_free_slots(busy_blocks, time_min, time_max, work_start, work_end) -> list[dict]`
@@ -67,6 +72,8 @@ Agree on function signatures early (they're already defined in the stubs):
 ## Phase 2: LLM Nodes & Validation Nodes (Mostly Will)
 
 **Goal:** Implement all graph nodes that Will owns. Partner starts frontend.
+
+**Current status:** Implemented on the integration branch. Node coverage still needs completion for `validate_candidates_node`.
 
 ### Will (Person A) -- Graph Nodes
 
@@ -92,6 +99,8 @@ Agree on function signatures early (they're already defined in the stubs):
 
 **Goal:** Wire the full LangGraph, connect frontend to graph, end-to-end flow.
 
+**Current status:** Implemented on the integration branch for mock-mode development. The approval/resume contract currently works by having `app.py` set `graph_state["selected_strategy"]` before calling `resume_graph(graph, graph_state, approved=True)`. This should be documented as canonical or refactored to pass `selected_strategy` explicitly.
+
 ### Will (Person A) -- Graph Orchestration
 
 | # | File | Functions | Notes |
@@ -115,17 +124,21 @@ Agree on function signatures early (they're already defined in the stubs):
 
 `app.py` calls Will's graph functions. Contract:
 - `run_graph_until_approval(graph, user_inputs)` returns `AgentState` with all 3 candidates, rationales, validations, and `candidates_identical`
-- `resume_graph(graph, paused_state, approved)` returns final `AgentState` with `write_results` (if approved)
+- `resume_graph(graph, paused_state, approved)` returns final `AgentState` with `write_results` if approved. Before approving, the frontend currently sets `paused_state["selected_strategy"]`.
 
 ---
 
 ## Phase 4: End-to-End Testing & Polish (Together)
 
+**Current status:** Pending. This is now the main active phase.
+
 1. Run full flow in `CALENDAR_MODE=mock` -- form submission through approval
 2. Test with `CALENDAR_MODE=live` if Google creds are available
 3. Edge cases: empty free slots, 0 subtasks, all strategies violate constraints, near-identical candidates
-4. CI green on Python 3.11 and 3.12
-5. Docker compose test (`docker compose up --build`)
+4. Replace no-op test stubs in validator/calendar API/validation-node tests
+5. Reconcile dependency metadata between `requirements.txt` and `pyproject.toml`
+6. CI green on Python 3.11 and 3.12
+7. Docker compose test (`docker compose up --build`)
 
 ---
 

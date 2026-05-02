@@ -5,6 +5,19 @@ decomposes it into subtasks via an LLM, finds free time in their Google
 Calendar, schedules those subtasks across available slots, and asks for
 approval before writing anything to the calendar.
 
+## Current Status
+
+The current integration branch has the core mock-mode application flow implemented:
+LLM client wrappers, calendar wrappers, free-slot computation, mock calendar,
+validator, heuristics, graph nodes, Streamlit UI, approval controls, and app
+session flow. `.venv/bin/pytest -q` currently reports `46 passed`, but some
+validator/calendar API/validation-node tests are still no-op stubs, so coverage
+is not complete yet.
+
+Remaining validation work includes a full `CALENDAR_MODE=mock` Streamlit
+walkthrough, live Google Calendar verification, and dependency metadata cleanup
+between `requirements.txt` and `pyproject.toml`.
+
 ## Architecture
 
 | Module | Location | Purpose |
@@ -34,7 +47,7 @@ cp .env.example .env
 CALENDAR_MODE=mock streamlit run src/app.py
 
 # 6. Run tests
-pytest
+.venv/bin/pytest -q
 ```
 
 ## Production Deployment (AWS)

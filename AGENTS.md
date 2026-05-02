@@ -2,16 +2,16 @@
 
 ## Project Overview
 
-Calendar Planning Agent -- a Streamlit app that takes a natural-language goal, decomposes it into subtasks via Codex (Anthropic LLM), finds free time on Google Calendar, schedules subtasks across available slots using three heuristics, validates each against hard constraints, and presents all three options to the user. The user picks a strategy (or rejects all), and approved events are written to the calendar. Built on LangGraph for orchestration.
+Calendar Planning Agent -- a Streamlit app that takes a natural-language goal, decomposes it into subtasks via Claude (Anthropic LLM), finds free time on Google Calendar, schedules subtasks across available slots using three heuristics, validates each against hard constraints, and presents all three options to the user. The user picks a strategy (or rejects all), and approved events are written to the calendar. Built on LangGraph for orchestration.
 
-**Status:** Skeleton/scaffold. Most functions have `pass # TODO: implement` bodies with detailed step-by-step comments. All test bodies are also stubs.
+**Status:** Active integration branch implementation. Core source modules are implemented for mock-mode development: LLM client, Google Calendar auth/events wrappers, free-slot computation, mock calendar, validator, three heuristics, graph nodes, graph wiring helpers, Streamlit frontend, approval controls, and app session flow. The local test suite currently reports `46 passed` with `.venv/bin/pytest -q`, but several validator/calendar-api/validation-node tests are still no-op `pass # TODO` stubs, so test coverage is not yet complete. End-to-end mock-mode Streamlit walkthrough and live Google Calendar verification are still pending.
 
 ## Tech Stack
 
 - **Python 3.11+** (required)
 - **Streamlit** -- frontend UI (intake form, schedule display, approval buttons)
 - **LangGraph / LangChain Core** -- directed graph orchestration with human-in-the-loop pause
-- **Anthropic SDK** -- LLM calls via `Codex-sonnet-4-20250514`
+- **Anthropic SDK** -- LLM calls via `claude-sonnet-4-20250514`
 - **Google Calendar API** -- OAuth 2.0 for event read/create (add-only, never update/delete)
 - **Pydantic** -- validation
 - **python-dotenv** -- env var loading
@@ -69,7 +69,7 @@ src/validator/
   constraints.py            -- 4 hard constraints: overlap, self-overlap, working hours, deadline
 src/llm_client/
   client.py                 -- call_llm_json / call_llm_text with retry logic
-tests/                      -- pytest tests (all stubs, mirror src modules)
+tests/                      -- pytest tests (partially implemented; some no-op stubs remain)
 infrastructure/             -- AWS CloudFormation + deploy script (placeholder)
 ```
 
@@ -127,21 +127,19 @@ pytest -v
 
 GitHub Actions (`.github/workflows/ci.yml`) runs `pytest -v` on Python 3.11 and 3.12 against `main` on push/PR. Uses `CALENDAR_MODE=mock`.
 
-## Implementation Order (Two-Person Split)
+## Current Implementation Progress
 
-See `docs/PROJECT_PLAN.md` for full details, `docs/WILL_IMPLEMENTATION_GUIDE.md` for Will's step-by-step guide and `docs/WILL_STATUS.md` for latest Will's implementation status.
+See `docs/PROJECT_PLAN.md` for the original phased plan, `docs/WILL_IMPLEMENTATION_GUIDE.md` for Will's implementation guide, and `docs/WILL_STATUS.md` / `docs/KANE_STATUS.md` for owner-level status tracking. Those status files should be kept in sync with the current integration branch.
 
-### Phase 1 — Foundations (Parallel, No Cross-Dependencies)
-- **Will:** `llm_client/client.py`, `calendar_api/auth.py`, `calendar_api/events.py`, `tests/test_llm_client.py`
-- **Partner:** `validator/constraints.py`, `free_slots.py`, `mock_calendar.py`, 3 heuristics, `tests/test_validator.py`, `tests/test_calendar_api.py`
+### Completed or Implemented on Integration Branch
+- **Will-owned foundations:** `llm_client/client.py`, `calendar_api/auth.py`, `calendar_api/events.py`, and LLM-client tests.
+- **Partner-owned logic:** validator, free-slot computation, mock calendar, three heuristics, and intake form.
+- **Graph/frontend integration:** graph nodes, graph wiring helpers, approval/write paths, schedule display, approval controls, and `src/app.py` session-state flow.
+- **Test status:** `.venv/bin/pytest -q` currently reports `46 passed`.
 
-### Phase 2 — Graph Nodes & Frontend (Partially Parallel)
-- **Will:** All 8 graph nodes (`decompose_goal`, `fetch_events`, `schedule_candidates`, `validate_candidates`, `generate_rationales`, `build_proposal`)
-- **Partner:** `frontend/intake_form.py`, `frontend/schedule_display.py`
-
-### Phase 3 — Graph Wiring & App Integration (Collaborative)
-- **Will:** `graph.py` (build/run/resume), `human_approval`, `write_events`
-- **Partner:** `approval_controls.py`, `app.py` (session state controller)
-
-### Phase 4 — End-to-End Testing (Together)
-- Full flow in `CALENDAR_MODE=mock`, edge cases, CI green on 3.11 & 3.12, Docker
+### Remaining Work
+- Replace remaining no-op test stubs in `tests/test_validator.py`, `tests/test_calendar_api.py`, and `tests/test_orchestration.py::TestValidateCandidates`.
+- Run and document a full `CALENDAR_MODE=mock` Streamlit walkthrough: intake, candidate generation, approve path, reject path.
+- Verify or explicitly defer live Google Calendar behavior with real OAuth credentials.
+- Reconcile dependency metadata: `requirements.txt` targets LangGraph 1.x while `pyproject.toml` still lists LangGraph `<1.0`.
+- Push/merge the integration branch to `main` after review and CI-equivalent validation.

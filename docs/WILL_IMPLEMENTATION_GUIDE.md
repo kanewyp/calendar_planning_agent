@@ -2,13 +2,21 @@
 
 **Owner:** Will (Person A)
 **Focus:** LLM client, Google Calendar API, all graph nodes, graph wiring
-**Implementation order:** Phase 1 -> Phase 2 -> Phase 3 (sequential, each phase builds on the previous)
+**Status:** Historical implementation guide. The current integration branch has implemented the core Will-owned pieces; use this file as design/reference context, not as a list of open implementation tasks.
+**Original implementation order:** Phase 1 -> Phase 2 -> Phase 3 (sequential, each phase builds on the previous)
+
+Current integration notes:
+- `src/llm_client/client.py`, `src/calendar_api/auth.py`, and `src/calendar_api/events.py` are implemented.
+- Graph nodes, graph wiring helpers, approval handling, and write-events handling are implemented on the integration branch.
+- Partner-owned dependencies called by Will's nodes are now implemented in source.
+- `.venv/bin/pytest -q` currently reports `46 passed`, but some tests remain no-op stubs and need completion.
+- Mock-mode end-to-end Streamlit validation and live Google Calendar verification are still pending.
 
 ---
 
 ## Phase 1: LLM Client & Calendar API
 
-These are foundational -- every graph node that calls the LLM or touches the calendar depends on them.
+These are foundational -- every graph node that calls the LLM or touches the calendar depends on them. They are implemented on the current integration branch.
 
 ---
 
@@ -124,7 +132,7 @@ Each node is a function that takes `AgentState` and returns a partial state dict
 
 3. Validate each item:
    - Has keys: `"name"` (non-empty string), `"description"` (string), `"duration_minutes"` (positive int)
-   - `duration_minutes <= state["max_session_minutes"]` -- if it exceeds, cap it
+   - `duration_minutes <= state["max_session_minutes"]` -- current implementation raises `ValueError` if it exceeds the limit
 
 4. Convert to `list[Subtask]` TypedDicts
 
@@ -185,7 +193,7 @@ result = schedule_energy_aware(state["subtasks"], state["free_slots"], state["wo
 return {"candidate_energy_aware": result}
 ```
 
-**Note:** Check the exact signatures of the partner's heuristic functions -- the `energy_aware` one might need `work_start` as `datetime.time` rather than string. Parse if needed.
+**Current note:** The integrated `energy_aware_node` passes `work_start` through as the state string, matching the current heuristic interface.
 
 ---
 
@@ -370,27 +378,30 @@ def _approval_decision(state: AgentState) -> str:
 
 3. Return the paused state
 
-**Note on LangGraph invoke with interrupts:** When `interrupt_before` is set, `graph.invoke()` returns the state at the interrupt point. You may need to use `graph.invoke(initial_state, config={"configurable": {"thread_id": "..."}})` with a checkpointer for persistence. Check LangGraph docs for the exact API -- this may require a `MemorySaver` or `SqliteSaver` checkpointer.
+**Current note:** The integrated helper currently invokes the compiled graph and expects the paused state dict back at `interrupt_before=["human_approval"]`. It does not currently use a persisted checkpointer/thread-id flow.
 
 ---
 
 ### 3.4 `src/orchestration/graph.py` -- `resume_graph(graph, paused_state, approved)`
 
-1. Update state:
+1. Copy and update state:
    ```python
-   paused_state["user_approved"] = approved
+   resumed_state = dict(paused_state)
+   resumed_state["user_approved"] = approved
    if approved:
-       paused_state["selected_strategy"] = user_inputs["selected_strategy"]  # passed from frontend
-       # human_approval_node will populate final_schedule
+       selected_strategy = resumed_state.get("selected_strategy")
+       # app.py currently sets selected_strategy before calling resume_graph.
+       # resume_graph validates it and copies the matching candidate to final_schedule.
    ```
 
-2. Resume: `result = graph.invoke(paused_state, config=...)`
-   - This resumes from `human_approval` node, which populates `final_schedule`
-   - Then `_approval_decision` routes to `write_events` (if approved) or `END`
+2. Execute the approval path:
+   - `human_approval_node` populates `final_schedule`
+   - `_approval_decision` routes to `write_events` if approved, or ends cleanly if rejected
+   - `write_events_node` is called directly from the helper when approved
 
 3. Return final state
 
-**Important:** The `resume_graph` function signature currently takes `approved: bool` but may need to also accept `selected_strategy: str` to know which candidate the user chose. Consider adjusting the signature or having `app.py` set it on `paused_state` before calling resume.
+**Current contract:** `resume_graph(graph, paused_state, approved)` still takes only `approved`; `app.py` sets `graph_state["selected_strategy"]` before calling it. This works in the current code. The remaining decision is whether to document that as canonical or refactor the helper to accept `selected_strategy` explicitly.
 
 ---
 
@@ -444,12 +455,12 @@ def human_approval_node(state: AgentState) -> dict[str, Any]:
 ## Dependency Chain Summary
 
 ```
-Phase 1 (implement first, no dependencies):
+Phase 1 (implemented; no dependencies):
   client.py  ←  no deps
   auth.py    ←  no deps
   events.py  ←  auth.py
 
-Phase 2 (implement after Phase 1):
+Phase 2 (implemented after Phase 1):
   decompose_goal.py       ←  client.py (call_llm_json)
   fetch_events.py         ←  Partner's free_slots + mock_calendar
   schedule_candidates.py  ←  Partner's 3 heuristics
@@ -457,7 +468,7 @@ Phase 2 (implement after Phase 1):
   generate_rationales.py  ←  client.py (call_llm_text)
   build_proposal.py       ←  no external deps (pure logic on state)
 
-Phase 3 (implement after Phase 2):
+Phase 3 (implemented after Phase 2):
   graph.py                ←  all nodes from Phase 2
   human_approval.py       ←  no external deps
   write_events.py         ←  events.py or mock_calendar
@@ -478,6 +489,7 @@ Phase 3 (implement after Phase 2):
 - Full graph run in `CALENDAR_MODE=mock` with mocked LLM
 - Test the interrupt/resume flow with `human_approval`
 - Test both approval and rejection paths
+- Current gap: no-op tests remain in validator/calendar API/validation-node areas; replace them before relying on the green suite as full coverage.
 
 ### What to mock:
 - `_call_anthropic` -- always mock in tests, never hit real API
@@ -490,18 +502,13 @@ Phase 3 (implement after Phase 2):
 
 1. **LangGraph v1:** The project targets LangGraph v1+ (pinned `>=1.0.0,<2.0` in requirements.txt). Graph primitives (StateGraph, nodes, edges, interrupt) are unchanged from 0.x. The `create_react_agent` prebuilt was deprecated in favor of `langchain.agents.create_agent`, but we don't use it -- we build a custom graph. Fan-out/fan-in should work natively.
 
-2. **Checkpointer for interrupt/resume:** `interrupt_before` requires a checkpointer. You'll likely need:
-   ```python
-   from langgraph.checkpoint.memory import MemorySaver
-   memory = MemorySaver()
-   graph.compile(checkpointer=memory, interrupt_before=["human_approval"])
-   ```
+2. **Interrupt/resume model:** The current integrated helper uses `interrupt_before=["human_approval"]` for the initial graph run, then handles approval/write execution from the paused state in `resume_graph`. If future work needs persisted multi-session graph continuation, revisit a checkpointer/thread-id design.
 
 3. **State key conflicts in fan-in:** The 3 heuristic nodes write to different keys, so no reducer is needed. But if LangGraph requires explicit reducer config, you may need to annotate `AgentState` fields.
 
 4. **Timezone handling:** All ISO datetime strings should be timezone-aware (UTC). Use `datetime.timezone.utc` consistently. The mock calendar data uses `+00:00`.
 
-5. **`resume_graph` signature:** The current stub takes `approved: bool` but the frontend also needs to pass `selected_strategy: str`. Either add it as a parameter or have `app.py` set it on `paused_state` before calling.
+5. **`resume_graph` signature:** The current contract is app-owned state mutation: `app.py` sets `selected_strategy` on the paused state, then calls `resume_graph(graph, paused_state, approved=True)`. Refactor to an explicit `selected_strategy` parameter only if the team wants a cleaner public interface.
 
 6. **Thread ID for checkpointer:** Each graph run needs a unique thread ID for the checkpointer. Generate with `uuid4()` and store in Streamlit session state.
 
@@ -509,16 +516,17 @@ Phase 3 (implement after Phase 2):
 
 ## Coordination with Partner
 
-### What you need from partner before Phase 2:
-- Working `compute_free_slots()` -- needed by `fetch_events_node`
-- Working `fetch_mock_busy_blocks()` -- needed by `fetch_events_node`
-- Working 3 heuristic functions -- needed by `schedule_candidates.py`
-- Working `validate_schedule()` -- needed by `validate_candidates_node`
+### Partner dependencies
 
-### What partner needs from you before Phase 3:
-- Working `run_graph_until_approval()` return shape -- partner's `app.py` calls this
-- Working `resume_graph()` interface -- partner's `app.py` calls this
-- Agreed `AgentState` keys populated at the interrupt point (all 3 candidates, validations, rationales, `candidates_identical`)
+These are now implemented on the integration branch:
+- `compute_free_slots()` -- used by `fetch_events_node`
+- `fetch_mock_busy_blocks()` -- used by `fetch_events_node` in mock mode
+- The three heuristic functions -- used by `schedule_candidates.py`
+- `validate_schedule()` -- used by `validate_candidates_node`
+- Frontend/app flow -- calls `run_graph_until_approval()` and `resume_graph()`
 
-### If partner's code isn't ready:
-- For Phase 2 node development, you can write temporary stubs that return hardcoded data matching the expected types. Use the fixtures in `conftest.py` as reference data. Replace with real calls once partner delivers.
+### Remaining coordination
+- Document or refactor the approval/resume contract.
+- Run and record a full mock-mode app walkthrough.
+- Replace remaining no-op test stubs.
+- Decide whether live Google Calendar verification is required before merging to `main`.

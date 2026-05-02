@@ -150,16 +150,23 @@ git push -u origin feat/my-feature
 # 6. Open a PR against main
 ```
 
-### Implementation order
+### Implementation status
 
-Follow the phased approach from `docs/PROJECT_PLAN.md`:
+The phased approach in `docs/PROJECT_PLAN.md` is now partly historical. The
+current integration branch includes implementations for the original Phase 1,
+Phase 2, and graph/app integration work:
 
-1. **Phase 1** — Foundations (parallel): Will does LLM client + Calendar API; Partner does validator, free slots, mock calendar, heuristics.
-2. **Phase 2** — Graph nodes + frontend (partially parallel): Will does all graph nodes; Partner does intake form + schedule display.
-3. **Phase 3** — Graph wiring + app integration (collaborative): Will does `graph.py` + final nodes; Partner does approval controls + `app.py`.
-4. **Phase 4** — End-to-end testing (together).
+- LLM client and Google Calendar auth/events wrappers
+- Validator, free-slot computation, mock calendar, and three heuristics
+- Graph nodes and graph wiring helpers
+- Streamlit intake, schedule display, approval controls, and app session flow
 
-This order matters — later modules depend on earlier ones. Don't skip ahead.
+Current development focus:
+- Replace remaining no-op test stubs in `tests/test_validator.py`, `tests/test_calendar_api.py`, and `tests/test_orchestration.py::TestValidateCandidates`.
+- Run and record a full `CALENDAR_MODE=mock` Streamlit walkthrough.
+- Confirm or refactor the approval/resume contract between `src/app.py` and `src/orchestration/graph.py`.
+- Reconcile dependency metadata between `requirements.txt` and `pyproject.toml`.
+- Verify `CALENDAR_MODE=live` with real Google OAuth credentials, or explicitly defer it.
 
 ---
 
@@ -185,7 +192,7 @@ This order matters — later modules depend on earlier ones. Don't skip ahead.
 - Every implemented function needs corresponding tests.
 - Tests must not make real API calls (LLM or Google). Mock external dependencies.
 - Use fixtures from `tests/conftest.py` for shared test data.
-- Run the full suite with `pytest -v` before pushing.
+- Run the full suite with `.venv/bin/pytest -q` before pushing. Treat the current green suite carefully until the remaining no-op test stubs are replaced.
 
 ---
 
