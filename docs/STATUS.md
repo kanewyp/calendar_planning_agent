@@ -27,7 +27,7 @@ Current command:
 Current result:
 
 ```text
-46 passed
+49 passed
 ```
 
 The previous no-op `pass # TODO` tests in `tests/test_validator.py`,
@@ -43,18 +43,15 @@ assertive unit tests.
   - approve path writes mock events
   - reject path exits with no writes
 - Verify live Google Calendar mode with real OAuth credentials, or explicitly defer it.
-- Decide whether to keep or refactor the approval/resume contract.
 
 ## Approval Contract
 
 Current behavior:
 
 - `run_graph_until_approval(graph, user_inputs)` returns a paused state with all candidates, validations, rationales, and `candidates_identical`.
-- In approve flow, `src/app.py` sets `graph_state["selected_strategy"] = strategy_name`.
-- `resume_graph(graph, graph_state, approved=True)` validates `selected_strategy`, copies the selected candidate into `final_schedule`, and runs `write_events_node`.
+- Approve flow calls `resume_graph(graph, graph_state, approved=True, selected_strategy=strategy_name)`.
+- `resume_graph(...)` validates `selected_strategy`, records it in state, copies the selected candidate into `final_schedule`, and runs `write_events_node`.
 - Reject flow calls `resume_graph(graph, graph_state, approved=False)` and exits without writes.
-
-Open decision: document this app-owned state mutation as the canonical contract, or refactor `resume_graph` to accept `selected_strategy` explicitly.
 
 ## Non-Negotiable Constraints
 
