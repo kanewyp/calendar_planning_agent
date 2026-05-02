@@ -27,7 +27,7 @@ Current command:
 Current result:
 
 ```text
-49 passed
+51 passed
 ```
 
 The previous no-op `pass # TODO` tests in `tests/test_validator.py`,
@@ -38,10 +38,12 @@ assertive unit tests.
 ## Known Gaps
 
 - Run and record a full `CALENDAR_MODE=mock` Streamlit walkthrough:
-  - intake form submit
+  - intake form submit (currently reaches planning; full flow requires `ANTHROPIC_API_KEY`)
   - candidate generation display
   - approve path writes mock events
   - reject path exits with no writes
+  - startup/import issue for `streamlit run src/app.py` has been fixed
+  - missing `ANTHROPIC_API_KEY` now displays a recoverable UI error instead of an uncaught traceback
 - Verify live Google Calendar mode with real OAuth credentials, or explicitly defer it.
 
 ## Approval Contract
