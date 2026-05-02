@@ -18,6 +18,15 @@
 # 6. On reject all    → reset session → show "no changes made".
 # =============================================================================
 
+from pathlib import Path
+import sys
+
+# Streamlit executes this file as a script, so sys.path starts at src/.
+# Add the project root so absolute imports like src.frontend.* work.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+  sys.path.insert(0, str(PROJECT_ROOT))
+
 import streamlit as st
 
 from src.frontend.intake_form import render_intake_form
@@ -46,6 +55,21 @@ def _init_session_state() -> None:
     for key, value in defaults.items():
       if key not in st.session_state:
         st.session_state[key] = value
+
+
+def _format_planning_error(exc: Exception) -> str:
+    """Return a user-facing message for planning failures."""
+    current: BaseException | None = exc
+    while current is not None:
+      if "ANTHROPIC_API_KEY is not set" in str(current):
+        return (
+          "ANTHROPIC_API_KEY is not set. CALENDAR_MODE=mock skips Google "
+          "Calendar credentials, but planning still needs Claude. Add "
+          "ANTHROPIC_API_KEY to .env and try again."
+        )
+      current = current.__cause__
+
+    return f"Planning failed: {exc}"
 
 
 def main() -> None:
@@ -103,9 +127,16 @@ def main() -> None:
       return
 
     if phase == "running":
-      with st.spinner("Agent is planning your schedule..."):
-        graph = build_graph()
-        paused_state = run_graph_until_approval(graph, st.session_state["user_inputs"])
+      try:
+        with st.spinner("Agent is planning your schedule..."):
+          graph = build_graph()
+          paused_state = run_graph_until_approval(graph, st.session_state["user_inputs"])
+      except Exception as exc:
+        st.session_state["graph"] = None
+        st.session_state["graph_state"] = None
+        st.session_state["phase"] = "intake"
+        st.error(_format_planning_error(exc))
+        return
 
       st.session_state["graph"] = graph
       st.session_state["graph_state"] = paused_state
