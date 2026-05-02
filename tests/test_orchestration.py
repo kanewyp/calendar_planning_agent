@@ -22,6 +22,7 @@ import pytest
 from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.decompose_goal import decompose_goal_node
 from src.orchestration.nodes.validate_candidates import validate_candidates_node
+from src.orchestration.graph import resume_graph
 from src.orchestration.heuristics.deadline_first import schedule_deadline_first
 from src.orchestration.heuristics.minimize_fragmentation import schedule_min_fragmentation
 from src.orchestration.heuristics.energy_aware import schedule_energy_aware
@@ -346,6 +347,93 @@ class TestValidateCandidates:
         for validation in result["candidate_validations"].values():
             assert validation["passed"] is True
             assert validation["violations"] == []
+
+
+class TestResumeGraph:
+    """Test the approval/resume helper contract."""
+
+    def test_approve_uses_explicit_selected_strategy(self):
+        deadline_first = [
+            {
+                "name": "Read React docs",
+                "description": "Official docs",
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            }
+        ]
+        min_fragmentation = [
+            {
+                "name": "Build counter",
+                "description": "Practice state",
+                "start": "2026-04-06T13:00:00+00:00",
+                "end": "2026-04-06T14:00:00+00:00",
+            }
+        ]
+        paused_state = {
+            "selected_strategy": "deadline_first",
+            "candidate_deadline_first": deadline_first,
+            "candidate_min_fragmentation": min_fragmentation,
+            "candidate_energy_aware": [],
+        }
+
+        with patch(
+            "src.orchestration.graph.write_events_node",
+            return_value={"write_results": [{"id": "mock-event"}]},
+        ) as write_events:
+            result = resume_graph(
+                graph=object(),
+                paused_state=paused_state,
+                approved=True,
+                selected_strategy="min_fragmentation",
+            )
+
+        assert result["user_approved"] is True
+        assert result["selected_strategy"] == "min_fragmentation"
+        assert result["final_schedule"] == min_fragmentation
+        assert result["write_results"] == [{"id": "mock-event"}]
+        write_events.assert_called_once()
+
+    def test_reject_does_not_require_strategy_or_write_events(self):
+        paused_state = {
+            "selected_strategy": "deadline_first",
+            "candidate_deadline_first": [],
+            "candidate_min_fragmentation": [],
+            "candidate_energy_aware": [],
+        }
+
+        with patch("src.orchestration.graph.write_events_node") as write_events:
+            result = resume_graph(
+                graph=object(),
+                paused_state=paused_state,
+                approved=False,
+            )
+
+        assert result["user_approved"] is False
+        assert result["selected_strategy"] is None
+        assert "write_results" not in result
+        write_events.assert_not_called()
+
+    def test_approve_requires_valid_selected_strategy(self):
+        paused_state = {
+            "candidate_deadline_first": [],
+            "candidate_min_fragmentation": [],
+            "candidate_energy_aware": [],
+        }
+
+        with pytest.raises(ValueError, match="requires a valid selected_strategy"):
+            resume_graph(
+                graph=object(),
+                paused_state=paused_state,
+                approved=True,
+            )
+
+        with pytest.raises(ValueError, match="requires a valid selected_strategy"):
+            resume_graph(
+                graph=object(),
+                paused_state=paused_state,
+                approved=True,
+                selected_strategy="not_a_strategy",
+            )
 
 
 class TestBuildProposal:

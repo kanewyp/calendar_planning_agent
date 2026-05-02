@@ -75,8 +75,9 @@ def main() -> None:
          c. Call render_strategy_buttons(graph_state.get("candidates_identical", False)).
          d. If ("approve", strategy_name):
             - Set phase to "done".
-            - Call resume_graph(graph, graph_state, approved=True)
-              with selected_strategy=strategy_name.
+            - Call resume_graph(
+                graph, graph_state, approved=True, selected_strategy=strategy_name
+              ).
             - Store success message in session_state["result"].
          e. If ("reject", None):
             - Set phase to "done".
@@ -128,8 +129,12 @@ def main() -> None:
 
       if action == "approve" and strategy_name is not None:
         graph = st.session_state.get("graph") or build_graph()
-        graph_state["selected_strategy"] = strategy_name
-        final_state = resume_graph(graph, graph_state, approved=True)
+        final_state = resume_graph(
+          graph,
+          graph_state,
+          approved=True,
+          selected_strategy=strategy_name,
+        )
 
         written_count = len(final_state.get("write_results", []))
         st.session_state["result"] = (

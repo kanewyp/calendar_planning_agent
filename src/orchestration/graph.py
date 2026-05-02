@@ -271,6 +271,7 @@ def resume_graph(
     graph: Any,
     paused_state: AgentState,
     approved: bool,
+    selected_strategy: str | None = None,
 ) -> AgentState:
     """Resume graph execution after the user approves or rejects.
 
@@ -278,6 +279,7 @@ def resume_graph(
         graph: Compiled LangGraph graph object.
         paused_state: State dict returned by run_graph_until_approval.
         approved: True if user clicked approve, False if rejected.
+        selected_strategy: Strategy selected by the user when approved=True.
 
     Returns:
         Final AgentState after write_events or clean end.
@@ -285,8 +287,9 @@ def resume_graph(
     STEPS:
     1. Set paused_state["user_approved"] = approved.
     2. If approved:
-       a. Set paused_state["selected_strategy"] to the user's chosen strategy.
-       b. Set paused_state["final_schedule"] to the candidate matching
+       a. Validate selected_strategy.
+       b. Set paused_state["selected_strategy"] to the user's chosen strategy.
+       c. Set paused_state["final_schedule"] to the candidate matching
           the selected strategy.
     3. Resume graph execution from the human_approval node.
     4. Return the final state.
@@ -296,13 +299,13 @@ def resume_graph(
     resumed_state["user_approved"] = approved
 
     if approved:
-        selected_strategy = resumed_state.get("selected_strategy")
         if selected_strategy not in STRATEGY_TO_STATE_KEY:
             raise ValueError(
-                "resume_graph: approved=True but selected_strategy is missing/invalid; "
+                "resume_graph: approved=True requires a valid selected_strategy; "
                 f"got {selected_strategy!r}"
             )
 
+        resumed_state["selected_strategy"] = selected_strategy
         strategy_state_key = STRATEGY_TO_STATE_KEY[selected_strategy]
         if strategy_state_key not in resumed_state:
             raise ValueError(
@@ -311,6 +314,8 @@ def resume_graph(
             )
 
         resumed_state["final_schedule"] = resumed_state[strategy_state_key]
+    else:
+        resumed_state["selected_strategy"] = None
 
     approval_updates = human_approval_node(resumed_state)
     resumed_state.update(approval_updates)
