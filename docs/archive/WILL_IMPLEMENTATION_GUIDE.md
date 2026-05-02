@@ -1,5 +1,7 @@
 # Will's Implementation Guide: LangGraph Orchestration & Infrastructure
 
+> Archived historical implementation guide. For current status, use `docs/STATUS.md`.
+
 **Owner:** Will (Person A)
 **Focus:** LLM client, Google Calendar API, all graph nodes, graph wiring
 **Status:** Historical implementation guide. The current integration branch has implemented the core Will-owned pieces; use this file as design/reference context, not as a list of open implementation tasks.

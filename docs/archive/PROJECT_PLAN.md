@@ -1,5 +1,7 @@
 # Project Plan: Calendar Planning Agent
 
+> Archived historical plan. For current status, use `docs/STATUS.md`.
+
 **Date:** 2026-04-17
 **Team:** 2 developers
 **Status:** Original implementation plan, now partially historical. The current integration branch has implemented the core application flow for mock-mode development.
@@ -15,7 +17,7 @@ As of the current integration branch:
 - End-to-end `CALENDAR_MODE=mock` Streamlit walkthrough and live Google Calendar verification are still pending.
 - `requirements.txt` and `pyproject.toml` currently disagree on LangGraph/LangChain version ranges and should be reconciled.
 
-This document still records the intended two-person implementation order. For current owner-specific status, see `docs/WILL_STATUS.md` and `docs/KANE_STATUS.md`.
+This document still records the intended two-person implementation order. For current owner-specific status, see `docs/archive/WILL_STATUS.md` and `docs/archive/KANE_STATUS.md`.
 
 ---
 

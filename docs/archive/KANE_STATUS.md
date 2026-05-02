@@ -1,5 +1,7 @@
 # Kane's Implementation Status
 
+> Archived owner-specific status notes. For current status, use `docs/STATUS.md`.
+
 Live checklist of Kane's work on the Calendar Planning Agent. Updated against the current integration branch.
 
 **Legend**

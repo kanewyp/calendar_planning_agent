@@ -152,7 +152,7 @@ git push -u origin feat/my-feature
 
 ### Implementation status
 
-The phased approach in `docs/PROJECT_PLAN.md` is now partly historical. The
+The phased approach in `docs/archive/PROJECT_PLAN.md` is now historical. The
 current integration branch includes implementations for the original Phase 1,
 Phase 2, and graph/app integration work:
 

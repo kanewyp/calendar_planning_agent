@@ -3,6 +3,8 @@
 > **Audience:** Any developer picking up the current integration branch.
 > **Goal:** After reading this document you should understand the current architecture, implemented behavior, remaining verification gaps, and the exact signatures and data shapes every function must respect.
 
+For faster AI/context usage, prefer `docs/ARCHITECTURE.md` and `docs/DEVELOPER_GUIDE.md`. This manual is the long-form detailed reference.
+
 ---
 
 ## Table of Contents
