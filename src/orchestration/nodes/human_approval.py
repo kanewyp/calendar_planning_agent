@@ -5,9 +5,10 @@
 # frontend sends back the user's strategy choice or rejection.
 #
 # In the user-choice model, the frontend presents all three candidates
-# side-by-side (or collapsed if near-identical) and the user either:
-#   1. Picks one strategy → sets selected_strategy + user_approved=True
-#   2. Rejects all        → sets user_approved=False
+# side-by-side (or collapsed if near-identical). The resume_graph helper then
+# records either:
+#   1. A picked strategy → selected_strategy + user_approved=True
+#   2. Reject all        → user_approved=False
 #
 # READS FROM STATE:  user_approved, selected_strategy
 # WRITES TO STATE:   final_schedule (populated from the chosen candidate)
@@ -34,8 +35,7 @@ def human_approval_node(state: AgentState) -> dict[str, Any]:
     execution pauses before entering this node. The frontend then:
       1. Displays all three candidates with rationales and violations.
       2. Collects the user's choice (pick a strategy or reject all).
-      3. Updates state["selected_strategy"] and state["user_approved"].
-      4. Resumes the graph.
+      3. Calls resume_graph with the approval decision and selected strategy.
 
     When the graph resumes and this node executes:
 
