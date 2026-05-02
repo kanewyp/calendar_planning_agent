@@ -1,7 +1,9 @@
 # Calendar Planning Agent — Programmer Manual
 
-> **Audience:** Any developer picking up this skeleton for the first time.
-> **Goal:** After reading this document you should be able to start coding immediately, knowing *what* to build, *in what order*, *why* that order matters, and the exact signatures and data shapes every function must respect.
+> **Audience:** Any developer picking up the current integration branch.
+> **Goal:** After reading this document you should understand the current architecture, implemented behavior, remaining verification gaps, and the exact signatures and data shapes every function must respect.
+
+For faster AI/context usage, prefer `docs/ARCHITECTURE.md` and `docs/DEVELOPER_GUIDE.md`. This manual is the long-form detailed reference.
 
 ---
 
@@ -12,10 +14,10 @@
 3. [Data Flow Through the System](#3-data-flow-through-the-system)
 4. [Shared Data Types (the Contract)](#4-shared-data-types-the-contract)
 5. [Environment Setup](#5-environment-setup)
-6. [Build Order & Dependency Graph](#6-build-order--dependency-graph)
-7. [Phase 1 — Pure-Logic Foundation (Days 1–4)](#7-phase-1--pure-logic-foundation-days-14)
-8. [Phase 2 — LLM Integration & Scheduling Heuristics (Days 5–9)](#8-phase-2--llm-integration--scheduling-heuristics-days-59)
-9. [Phase 3 — Graph Wiring & Frontend (Days 10–15)](#9-phase-3--graph-wiring--frontend-days-1015)
+6. [Implementation Status & Dependency Graph](#6-implementation-status--dependency-graph)
+7. [Phase 1 — Pure-Logic Foundation Reference](#7-phase-1--pure-logic-foundation-reference)
+8. [Phase 2 — LLM Integration & Scheduling Heuristics Reference](#8-phase-2--llm-integration--scheduling-heuristics-reference)
+9. [Phase 3 — Graph Wiring & Frontend Reference](#9-phase-3--graph-wiring--frontend-reference)
 10. [File-by-File Implementation Reference](#10-file-by-file-implementation-reference)
 11. [Testing Strategy](#11-testing-strategy)
 12. [Common Pitfalls & Tips](#12-common-pitfalls--tips)
@@ -35,6 +37,16 @@ The application is a **Calendar Augmentation Agent** that:
 7. Presents **all three options** to the user for **approval** via a Streamlit UI.
 8. The user **picks a strategy** or rejects all.
 9. On approval, **writes events** to Google Calendar (add-only, never update/delete).
+
+### Current Status Snapshot
+
+The current integration branch has implemented the core source modules for mock-mode development: settings, state types, LLM client, Google Calendar auth/events wrappers, free-slot computation, mock calendar, validator, three scheduling heuristics, graph nodes, graph wiring helpers, frontend components, approval controls, and `src/app.py`.
+
+Known remaining work:
+- `.venv/bin/pytest -q` currently reports `46 passed`, but several tests are still no-op `pass # TODO` stubs, especially validator/calendar API tests and `TestValidateCandidates`.
+- A full `CALENDAR_MODE=mock` Streamlit walkthrough still needs to be run and recorded.
+- Live Google Calendar behavior still needs real OAuth credential verification.
+- `requirements.txt` and `pyproject.toml` currently disagree on LangGraph/LangChain version ranges and should be reconciled.
 
 ---
 
@@ -91,7 +103,7 @@ calendar_planning_agent/
 │   ├── test_llm_client.py
 │   └── test_frontend.py
 │
-└── infrastructure/              ← AWS stubs (ignore during first 3 weeks)
+└── infrastructure/              ← AWS deployment placeholders
 ```
 
 ### Module Dependency Diagram
@@ -272,7 +284,7 @@ cp .env.example .env
 # Edit .env → set ANTHROPIC_API_KEY=sk-ant-...
 # Leave CALENDAR_MODE=mock for now
 
-# 5. Verify pytest runs (all tests will be skipped/pass since bodies are `pass`)
+# 5. Verify pytest runs (green today, but some no-op test stubs remain)
 pytest -v
 
 # 6. Verify imports resolve
@@ -281,12 +293,12 @@ python -c "from config.settings import settings; print(settings.CALENDAR_MODE)"
 
 ---
 
-## 6. Build Order & Dependency Graph
+## 6. Implementation Status & Dependency Graph
 
-This is the **critical section**. The numbers represent the strict implementation order. Files within the same step are independent of each other and can be done in parallel.
+This section preserves the original implementation order because it is still useful for understanding dependencies. On the current integration branch, Steps 1 through 6 are implemented in source. The main active work is Step 7-style verification, replacing no-op tests, and polishing the graph/app approval contract.
 
 ```
-STEP 1 ─── Zero-dependency pure logic (test immediately)
+STEP 1 ─── Zero-dependency pure logic (implemented; tests need completion)
   │
   ├── src/validator/constraints.py          ← intervals_overlap + validate_schedule
   ├── src/calendar_api/free_slots.py        ← compute_free_slots + _day_working_window
@@ -294,14 +306,14 @@ STEP 1 ─── Zero-dependency pure logic (test immediately)
   │
   │   Tests: pytest tests/test_validator.py tests/test_calendar_api.py
   │
-STEP 2 ─── LLM client (needs Anthropic key, but testable with mocks)
+STEP 2 ─── LLM client (implemented; tested with mocks)
   │
   └── src/llm_client/client.py              ← _build_client, _call_anthropic,
   │                                            call_llm_json, call_llm_text
   │
   │   Tests: pytest tests/test_llm_client.py (fully mocked, no real API calls)
   │
-STEP 3 ─── Scheduling heuristics (depend on state.py types + free_slots output)
+STEP 3 ─── Scheduling heuristics (implemented)
   │
   ├── src/orchestration/heuristics/deadline_first.py
   ├── src/orchestration/heuristics/minimize_fragmentation.py
@@ -309,7 +321,7 @@ STEP 3 ─── Scheduling heuristics (depend on state.py types + free_slots ou
   │
   │   Tests: pytest tests/test_orchestration.py (heuristic classes)
   │
-STEP 4 ─── Graph nodes (each depends on ≥1 of the above)
+STEP 4 ─── Graph nodes (implemented; validation-node tests need completion)
   │
   ├── src/orchestration/nodes/decompose_goal.py     ← needs llm_client
   ├── src/orchestration/nodes/fetch_events.py       ← needs calendar_api
@@ -320,14 +332,14 @@ STEP 4 ─── Graph nodes (each depends on ≥1 of the above)
   ├── src/orchestration/nodes/human_approval.py     ← maps selected strategy to final_schedule
   └── src/orchestration/nodes/write_events.py       ← needs calendar_api
   │
-STEP 5 ─── Graph assembly (depends on ALL nodes)
+STEP 5 ─── Graph assembly (implemented)
   │
   └── src/orchestration/graph.py            ← build_graph, run_graph_until_approval,
   │                                            resume_graph, conditional edges
   │
   │   Test: run the full graph with mock calendar + mock LLM to verify wiring
   │
-STEP 6 ─── Frontend + app entry point (depends on graph.py)
+STEP 6 ─── Frontend + app entry point (implemented)
   │
   ├── src/frontend/intake_form.py
   ├── src/frontend/schedule_display.py
@@ -336,7 +348,7 @@ STEP 6 ─── Frontend + app entry point (depends on graph.py)
   │
   │   Test: CALENDAR_MODE=mock streamlit run src/app.py
   │
-STEP 7 ─── Real Google Calendar (only after everything works with mock)
+STEP 7 ─── Real Google Calendar (wrappers implemented; live verification pending)
   │
   ├── src/calendar_api/auth.py
   └── src/calendar_api/events.py
@@ -344,13 +356,15 @@ STEP 7 ─── Real Google Calendar (only after everything works with mock)
 
 ---
 
-## 7. Phase 1 — Pure-Logic Foundation (Days 1–4)
+## 7. Phase 1 — Pure-Logic Foundation Reference
+
+These notes describe the implementation shape that now exists on the integration branch. Treat them as maintenance/reference notes, not as open implementation tasks.
 
 ### 7.1 `src/validator/constraints.py`
 
 **Why first:** The validator has zero in-project dependencies. It's pure Python with `datetime` math. Once working, it becomes the test oracle for every other module.
 
-**What to implement:**
+**Current behavior / implementation notes:**
 
 #### `intervals_overlap(start_a, end_a, start_b, end_b) -> bool`
 The simplest function in the project. Two half-open intervals `[A, B)` overlap iff `start_a < end_b and start_b < end_a`. One line of logic.
@@ -375,7 +389,7 @@ Return `{"passed": len(violations) == 0, "violations": violations}`.
 
 **Gotcha:** All start/end values in the dicts are ISO strings. You must parse them with `datetime.datetime.fromisoformat()` inside this function (or create a small helper).
 
-**Test immediately:**
+**Targeted test command:**
 ```bash
 pytest tests/test_validator.py -v
 ```
@@ -384,9 +398,9 @@ pytest tests/test_validator.py -v
 
 ### 7.2 `src/calendar_api/free_slots.py`
 
-**Why second:** It's also pure logic with zero API calls. It depends only on `datetime` and produces the `free_slots` list that all three heuristics consume.
+**Why this matters:** It's pure logic with zero API calls. It depends only on `datetime` and produces the `free_slots` list that all three heuristics consume.
 
-**What to implement:**
+**Current behavior / implementation notes:**
 
 #### `_day_working_window(day, work_start, work_end, tz) -> (datetime, datetime)`
 ```python
@@ -436,7 +450,7 @@ pytest tests/test_calendar_api.py::TestComputeFreeSlots -v
 
 ### 7.3 `src/calendar_api/mock_calendar.py`
 
-**Why here:** It's trivial but needed for integration testing later.
+**Why this matters:** It enables app and graph development without Google OAuth credentials.
 
 #### `fetch_mock_busy_blocks(time_min, time_max) -> list[dict]`
 Iterate over the hardcoded `MOCK_EVENTS` list. Parse each event's start/end strings. Keep events where `start >= time_min and end <= time_max`. Return as `[{"start": ..., "end": ...}]`.
@@ -457,18 +471,19 @@ pytest tests/test_calendar_api.py::TestMockCalendar -v
 
 ### Phase 1 Checkpoint
 
-At this point you should have:
-- `pytest tests/test_validator.py` — all green
-- `pytest tests/test_calendar_api.py` — all green
-- Confidence that the core logic is correct before touching any LLM or API code
+Current caveat:
+- `pytest tests/test_validator.py` and `pytest tests/test_calendar_api.py` pass, but many tests in those files are no-op stubs. Replace those stubs before treating the green suite as meaningful coverage.
+- The source implementations are present and used by graph/app code.
 
 ---
 
-## 8. Phase 2 — LLM Integration & Scheduling Heuristics (Days 5–9)
+## 8. Phase 2 — LLM Integration & Scheduling Heuristics Reference
+
+These modules are implemented on the current integration branch. The notes below document intended behavior and maintenance expectations.
 
 ### 8.1 `src/llm_client/client.py`
 
-**Why now:** The decompose_goal and rationale nodes need this, and it's testable with mocks.
+**Why this matters:** The decompose_goal and rationale nodes need this, and it is testable with mocks.
 
 #### `_build_client() -> anthropic.Anthropic`
 ```python
@@ -550,7 +565,7 @@ def _place_subtask_in_slot(subtask, slot_start, slot_end):
     return event, remaining
 ```
 
-You can put this helper in a shared utility or duplicate it in each heuristic.
+The current heuristics each own their placement logic. If future changes create meaningful duplication, extract a shared helper carefully and keep behavior covered by tests.
 
 #### 8.2.1 `deadline_first.py` — `schedule_deadline_first(subtasks, free_slots)`
 
@@ -598,18 +613,18 @@ pytest tests/test_orchestration.py -v -k "Heuristic"
 
 ### Phase 2 Checkpoint
 
-At this point you should have:
-- All three heuristics producing valid `list[ProposedEvent]` from test data
-- `call_llm_json` and `call_llm_text` working (verified with mocked tests)
-- You can manually test: `schedule_deadline_first(sample_subtasks, sample_free_slots)` in a Python REPL and see a sensible schedule
+Current status:
+- All three heuristics produce `list[ProposedEvent]` from fixture-style free slots.
+- `call_llm_json` and `call_llm_text` are implemented and covered by mocked tests.
+- Remaining work is mostly edge-case test coverage, not first implementation.
 
 ---
 
-## 9. Phase 3 — Graph Wiring & Frontend (Days 10–15)
+## 9. Phase 3 — Graph Wiring & Frontend Reference
 
 ### 9.1 Graph Nodes (Step 4 in the build order)
 
-Each node is a small function that reads from `state`, calls one of the modules you already built, and returns the keys it writes. They are thin wrappers.
+Each node is a small function that reads from `state`, calls one of the modules above, and returns the keys it writes. These nodes are implemented on the current integration branch.
 
 #### `nodes/decompose_goal.py`
 ```python
@@ -674,7 +689,7 @@ Branch on `CALENDAR_MODE`. Call `create_mock_event` or `create_events_batch` for
 
 ### 9.2 `src/orchestration/graph.py`
 
-**This is where everything comes together.** The three functions to implement:
+**This is where everything comes together.** These are the main graph helper functions:
 
 #### `build_graph() -> StateGraph`
 
@@ -756,10 +771,20 @@ return graph.invoke(initial_state)
 
 #### `resume_graph(graph, paused_state, approved) -> AgentState`
 ```python
-paused_state["user_approved"] = approved
-return graph.invoke(paused_state)
-# Or use graph.update_state() + graph.invoke() depending on LangGraph version
+resumed_state = dict(paused_state)
+resumed_state["user_approved"] = approved
+if approved:
+    # app.py currently sets selected_strategy before calling resume_graph.
+    # resume_graph validates it and copies the matching candidate to final_schedule.
+    ...
+approval_updates = human_approval_node(resumed_state)
+resumed_state.update(approval_updates)
+if _approval_decision(resumed_state) == "write_events":
+    resumed_state.update(write_events_node(resumed_state))
+return resumed_state
 ```
+
+Current contract: `app.py` sets `graph_state["selected_strategy"] = strategy_name` before calling `resume_graph(graph, graph_state, approved=True)`. This should either be documented as canonical or refactored so `resume_graph` accepts `selected_strategy` explicitly.
 
 ---
 
@@ -790,7 +815,7 @@ if submitted:
 Use `st.dataframe` or a `for` loop with `st.write`. Group by date. Show the rationale with `st.info()`.
 
 #### `src/frontend/approval_controls.py`
-Two `st.button` widgets in `st.columns(2)`. Return `"approve"`, `"reject"`, or `None`.
+Strategy buttons plus a reject-all control. `render_strategy_buttons()` returns `(action, strategy_name)`, where action is `"approve"`, `"reject"`, or `None`.
 
 #### `src/app.py`
 State machine with four phases: `intake` → `running` → `review` → `done`.
@@ -848,11 +873,11 @@ Quick-reference table of every file, what it depends on, and its key functions.
 | 15 | `nodes/write_events.py` | `calendar_api` | `write_events_node()` | Branches mock vs live |
 | 16 | `orchestration/graph.py` | all nodes | `build_graph()`, `run_graph_until_approval()`, `resume_graph()` | LangGraph assembly |
 | 17 | `frontend/intake_form.py` | nothing | `render_intake_form()` | Streamlit form |
-| 18 | `frontend/schedule_display.py` | nothing | `render_schedule()`, `render_rationale()`, `render_violation_warning()` | Streamlit display |
-| 19 | `frontend/approval_controls.py` | nothing | `render_approval_buttons()` | Two buttons |
+| 18 | `frontend/schedule_display.py` | nothing | `render_all_candidates()`, `render_single_schedule()`, `render_collapsed_view()`, `render_violation_badge()` | Streamlit display |
+| 19 | `frontend/approval_controls.py` | nothing | `render_strategy_buttons()` | Strategy/reject controls |
 | 20 | `app.py` | `graph.py`, `frontend/*` | `main()`, `_init_session_state()` | State machine |
-| 21 | `calendar_api/auth.py` | Google libs | `get_credentials()`, `build_calendar_service()` | Do LAST |
-| 22 | `calendar_api/events.py` | `auth.py` | `fetch_busy_blocks()`, `create_event()`, `create_events_batch()` | Add-only, never delete |
+| 21 | `calendar_api/auth.py` | Google libs | `get_credentials()`, `build_calendar_service()` | Implemented; live verification pending |
+| 22 | `calendar_api/events.py` | `auth.py` | `fetch_busy_blocks()`, `create_event()`, `create_events_batch()` | Add-only; live verification pending |
 
 ---
 
@@ -873,6 +898,8 @@ pytest tests/test_orchestration.py -v
 pytest tests/test_frontend.py -v
 pytest -v  # all tests
 ```
+
+Current caveat: `.venv/bin/pytest -q` reports `46 passed`, but several tests are still no-op stubs. Fill in `tests/test_validator.py`, `tests/test_calendar_api.py`, and `tests/test_orchestration.py::TestValidateCandidates` before relying on the suite as a quality signal.
 
 ### Test fixtures live in `tests/conftest.py`
 
@@ -965,18 +992,13 @@ This lets you develop and test the entire pipeline without Google credentials.
 
 ---
 
-## Quick-Start Checklist
+## Current Quick-Start Checklist
 
 - [ ] `pip install -r requirements.txt` — all dependencies install
 - [ ] `cp .env.example .env` — fill in `ANTHROPIC_API_KEY`
-- [ ] Implement `validator/constraints.py` → run `pytest tests/test_validator.py`
-- [ ] Implement `calendar_api/free_slots.py` → run `pytest tests/test_calendar_api.py`
-- [ ] Implement `calendar_api/mock_calendar.py` → run `pytest tests/test_calendar_api.py`
-- [ ] Implement `llm_client/client.py` → run `pytest tests/test_llm_client.py`
-- [ ] Implement three heuristics → run `pytest tests/test_orchestration.py`
-- [ ] Implement all graph nodes
-- [ ] Implement `orchestration/graph.py`
-- [ ] Implement frontend components
-- [ ] Implement `app.py`
-- [ ] `CALENDAR_MODE=mock streamlit run src/app.py` — full end-to-end test
-- [ ] Implement `calendar_api/auth.py` + `events.py` — switch to `CALENDAR_MODE=live`
+- [ ] Run `.venv/bin/pytest -q` and confirm the current baseline
+- [ ] Replace remaining no-op test stubs in validator/calendar API/validation-node tests
+- [ ] Run `CALENDAR_MODE=mock streamlit run src/app.py` and record a full approve/reject walkthrough
+- [ ] Confirm the approval/resume contract or refactor `resume_graph` to accept `selected_strategy`
+- [ ] Reconcile LangGraph/LangChain version ranges in `requirements.txt` and `pyproject.toml`
+- [ ] Verify `CALENDAR_MODE=live` with real Google OAuth credentials, or explicitly defer it
