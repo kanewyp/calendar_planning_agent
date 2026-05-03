@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.orchestration.debug_trace import make_trace_event, trace_update
 from src.orchestration.state import AgentState
 
 
@@ -49,7 +50,12 @@ def human_approval_node(state: AgentState) -> dict[str, Any]:
     user_approved = state.get("user_approved")
 
     if user_approved is False:
-        return {}
+        trace = make_trace_event(
+            "human_approval",
+            summary={"user_approved": False, "selected_strategy": None},
+            details={"decision": "rejected"},
+        )
+        return trace_update(trace)
 
     if user_approved is not True:
         raise ValueError(
@@ -70,4 +76,15 @@ def human_approval_node(state: AgentState) -> dict[str, Any]:
             f"human_approval_node: candidate '{state_key}' is missing from state"
         )
 
-    return {"final_schedule": state[state_key]}
+    final_schedule = state[state_key]
+    trace = make_trace_event(
+        "human_approval",
+        summary={
+            "user_approved": True,
+            "selected_strategy": selected_strategy,
+            "final_event_count": len(final_schedule),
+        },
+        details={"selected_candidate_key": state_key},
+    )
+
+    return {"final_schedule": final_schedule, **trace_update(trace)}

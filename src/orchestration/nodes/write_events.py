@@ -14,6 +14,7 @@ import datetime
 from typing import Any
 
 from config.settings import settings
+from src.orchestration.debug_trace import make_trace_event, trace_update
 from src.orchestration.state import AgentState
 
 
@@ -64,4 +65,19 @@ def write_events_node(state: AgentState) -> dict[str, Any]:
             "expected 'mock' or 'live'"
         )
 
-    return {"write_results": responses}
+    trace = make_trace_event(
+        "write_events",
+        summary={
+            "calendar_mode": mode,
+            "requested_event_count": len(final_schedule),
+            "written_event_count": len(responses),
+        },
+        details={
+            "event_names": [
+                event.get("name", "Untitled event")
+                for event in final_schedule
+            ]
+        },
+    )
+
+    return {"write_results": responses, **trace_update(trace)}

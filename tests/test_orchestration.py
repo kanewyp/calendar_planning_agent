@@ -55,7 +55,9 @@ class TestDecomposeGoalNode:
         ):
             result = decompose_goal_node(state)
 
-        assert result == {"subtasks": llm_output}
+        assert result["subtasks"] == llm_output
+        assert result["debug_trace"][0]["node"] == "decompose_goal"
+        assert result["debug_trace"][0]["details"]["count"] == 2
 
     def test_empty_llm_output_raises(self):
         state = {
@@ -315,6 +317,7 @@ class TestValidateCandidates:
         assert validations["deadline_first"]["passed"] is True
         assert validations["min_fragmentation"]["passed"] is False
         assert validations["energy_aware"]["passed"] is False
+        assert result["debug_trace"][0]["node"] == "validate_candidates"
 
     def test_clean_candidate_passes(self):
         """A candidate with no constraint violations should pass validation.
@@ -391,6 +394,7 @@ class TestResumeGraph:
         assert result["selected_strategy"] == "min_fragmentation"
         assert result["final_schedule"] == min_fragmentation
         assert result["write_results"] == [{"id": "mock-event"}]
+        assert result["debug_trace"][0]["node"] == "human_approval"
         write_events.assert_called_once()
 
     def test_reject_does_not_require_strategy_or_write_events(self):
@@ -411,6 +415,7 @@ class TestResumeGraph:
         assert result["user_approved"] is False
         assert result["selected_strategy"] is None
         assert "write_results" not in result
+        assert result["debug_trace"][0]["node"] == "human_approval"
         write_events.assert_not_called()
 
     def test_approve_requires_valid_selected_strategy(self):
@@ -463,7 +468,8 @@ class TestBuildProposal:
 
         result = build_proposal_node(state)
 
-        assert result == {"candidates_identical": True}
+        assert result["candidates_identical"] is True
+        assert result["debug_trace"][0]["node"] == "build_proposal"
 
     def test_different_candidates_not_flagged(self):
         """When candidates differ, candidates_identical should be False.
@@ -492,4 +498,5 @@ class TestBuildProposal:
 
         result = build_proposal_node(state)
 
-        assert result == {"candidates_identical": False}
+        assert result["candidates_identical"] is False
+        assert result["debug_trace"][0]["node"] == "build_proposal"

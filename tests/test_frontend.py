@@ -22,6 +22,7 @@ from contextlib import contextmanager
 import pytest
 
 from src.frontend import approval_controls
+from src.frontend import debug_panel
 from src.frontend import intake_form
 from src.frontend import schedule_display
 
@@ -209,6 +210,48 @@ class TestScheduleDisplay:
         assert days[1].isoformat() == "2026-04-07"
         assert len(grouped[days[0]]) == 2
         assert len(grouped[days[1]]) == 1
+
+
+class TestDebugPanel:
+    def test_format_debug_report_includes_trace_summaries(self):
+        state = {
+            "goal": "Learn Python",
+            "deadline": "2026-05-15",
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "debug_trace": [
+                {
+                    "node": "decompose_goal",
+                    "status": "success",
+                    "summary": {"provider": "vertex_ai", "model": "google/gemini"},
+                    "details": {
+                        "items": [
+                            {"name": "Set up Python", "duration_minutes": 60},
+                            {"name": "Build calculator", "duration_minutes": 90},
+                        ]
+                    },
+                },
+                {
+                    "node": "validate_candidates",
+                    "status": "success",
+                    "summary": {},
+                    "details": {
+                        "deadline_first": {
+                            "passed": True,
+                            "violation_count": 0,
+                        }
+                    },
+                },
+            ],
+        }
+
+        report = debug_panel.format_debug_report(state)
+
+        assert "Goal: Learn Python" in report
+        assert "decompose_goal [success]" in report
+        assert "provider: vertex_ai" in report
+        assert "Set up Python" in report
+        assert "deadline_first: passed=True violations=0" in report
 
 
 class TestApprovalControls:
