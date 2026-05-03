@@ -25,8 +25,24 @@ load_dotenv(_PROJECT_ROOT / ".env")
 class Settings:
     """Read-only application settings sourced from environment variables."""
 
-    # --- Anthropic ---
+    # --- LLM provider ---
+    # Supported values:
+    # - "anthropic": use the Anthropic SDK.
+    # - "gemini": use Gemini's OpenAI-compatible Chat Completions endpoint.
+    # - "vertex_ai": use Vertex AI's OpenAI-compatible Chat Completions endpoint.
+    # - "openai_compatible": use any OpenAI-compatible Chat Completions endpoint.
+    # - "mock": return deterministic local responses for development.
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")
+    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
+    LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "")
+    LLM_DECOMPOSITION_MODEL: str = os.getenv("LLM_DECOMPOSITION_MODEL", "")
+    LLM_RATIONALE_MODEL: str = os.getenv("LLM_RATIONALE_MODEL", "")
+    VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", "")
+    VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "global")
+
+    # --- Provider-specific compatibility keys ---
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 
     # --- Google Calendar ---
     GOOGLE_CLIENT_SECRET_FILE: str = os.getenv(

@@ -27,7 +27,7 @@ Current command:
 Current result:
 
 ```text
-51 passed
+58 passed
 ```
 
 The previous no-op `pass # TODO` tests in `tests/test_validator.py`,
@@ -38,13 +38,26 @@ assertive unit tests.
 ## Known Gaps
 
 - Run and record a full `CALENDAR_MODE=mock` Streamlit walkthrough:
-  - intake form submit (currently reaches planning; full flow requires `ANTHROPIC_API_KEY`)
+  - intake form submit
   - candidate generation display
   - approve path writes mock events
   - reject path exits with no writes
   - startup/import issue for `streamlit run src/app.py` has been fixed
-  - missing `ANTHROPIC_API_KEY` now displays a recoverable UI error instead of an uncaught traceback
+- `CALENDAR_MODE=mock LLM_PROVIDER=mock` graph smoke test passes without live LLM or Google credentials.
+- `CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai` Streamlit approve-path smoke test passes with Google Cloud ADC and creates mock calendar events.
+- Verify Gemini API or another API-key-based low-cost provider only if policy allows API keys.
 - Verify live Google Calendar mode with real OAuth credentials, or explicitly defer it.
+
+## LLM Providers
+
+Current behavior:
+
+- All LLM calls go through `src/llm_client/client.py`.
+- Supported providers are `anthropic`, `gemini`, `vertex_ai`, `openai_compatible`, and `mock`.
+- `LLM_PROVIDER=gemini` uses Gemini's OpenAI-compatible Chat Completions endpoint.
+- `LLM_PROVIDER=vertex_ai` uses Vertex AI's OpenAI-compatible Chat Completions endpoint with Google Cloud Application Default Credentials.
+- `LLM_PROVIDER=mock` returns deterministic local responses for end-to-end mock walkthroughs.
+- Goal decomposition uses the `decomposition` purpose; schedule explanations use the `rationale` purpose, so models can be configured separately.
 
 ## Approval Contract
 
