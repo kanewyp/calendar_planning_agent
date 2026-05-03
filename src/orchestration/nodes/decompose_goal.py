@@ -69,7 +69,7 @@ def decompose_goal_node(state: AgentState) -> dict[str, Any]:
     )
 
     try:
-        raw = call_llm_json(prompt)
+        raw = call_llm_json(prompt, purpose="decomposition")
     except Exception as exc:
         raise RuntimeError(
             "Goal decomposition failed: unable to get a valid subtask list from the LLM"

@@ -61,11 +61,17 @@ def _format_planning_error(exc: Exception) -> str:
     """Return a user-facing message for planning failures."""
     current: BaseException | None = exc
     while current is not None:
+      if "LLM API key is not set" in str(current):
+        return (
+          "LLM API key is not set. CALENDAR_MODE=mock skips Google Calendar "
+          "credentials, but planning still needs an LLM unless "
+          "LLM_PROVIDER=mock. Add LLM_API_KEY/GEMINI_API_KEY to .env or use "
+          "LLM_PROVIDER=mock and try again."
+        )
       if "ANTHROPIC_API_KEY is not set" in str(current):
         return (
-          "ANTHROPIC_API_KEY is not set. CALENDAR_MODE=mock skips Google "
-          "Calendar credentials, but planning still needs Claude. Add "
-          "ANTHROPIC_API_KEY to .env and try again."
+          "ANTHROPIC_API_KEY is not set. Set LLM_API_KEY, ANTHROPIC_API_KEY, "
+          "or use LLM_PROVIDER=mock and try again."
         )
       current = current.__cause__
 

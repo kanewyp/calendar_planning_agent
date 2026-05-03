@@ -134,7 +134,10 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
         )
 
         try:
-            rationales[strategy_name] = call_llm_text(prompt).strip()
+            rationales[strategy_name] = call_llm_text(
+                prompt,
+                purpose="rationale",
+            ).strip()
         except Exception as exc:
             raise RuntimeError(
                 f"Rationale generation failed for strategy '{strategy_name}'"

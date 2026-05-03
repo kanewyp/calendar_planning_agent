@@ -11,10 +11,11 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Mock mode is the default development path and does not require Google credentials:
+Mock calendar mode does not require Google credentials. Use `LLM_PROVIDER=mock`
+for a fully local walkthrough that also skips paid/hosted LLM calls:
 
 ```bash
-CALENDAR_MODE=mock streamlit run src/app.py
+CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py
 ```
 
 ## Test
@@ -41,7 +42,7 @@ Useful targeted runs:
 Run:
 
 ```bash
-CALENDAR_MODE=mock streamlit run src/app.py
+CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py
 ```
 
 Walkthrough to record:
@@ -55,17 +56,66 @@ Walkthrough to record:
 
 Key values from `.env.example`:
 
-- `ANTHROPIC_API_KEY`
+- `LLM_PROVIDER` -- `anthropic`, `gemini`, `vertex_ai`, `openai_compatible`, or `mock`
+- `LLM_API_KEY` -- generic key for Gemini/OpenAI-compatible providers
+- `GEMINI_API_KEY` -- optional Gemini-specific key
+- `VERTEX_PROJECT_ID` -- Google Cloud project for Vertex AI
+- `VERTEX_LOCATION` -- Vertex AI location, defaults to `global`
+- `ANTHROPIC_API_KEY` -- legacy Anthropic-specific key
+- `LLM_BASE_URL` -- required for `LLM_PROVIDER=openai_compatible`
+- `LLM_DECOMPOSITION_MODEL`
+- `LLM_RATIONALE_MODEL`
 - `GOOGLE_CLIENT_SECRET_FILE`
 - `CALENDAR_MODE`
 - `DEFAULT_WORK_START`
 - `DEFAULT_WORK_END`
 
 Use `CALENDAR_MODE=mock` unless explicitly testing live Google Calendar behavior.
+Use `LLM_PROVIDER=mock` unless explicitly testing a live LLM provider.
+
+Gemini example:
+
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=<your Gemini API key>
+LLM_DECOMPOSITION_MODEL=gemini-2.5-flash
+LLM_RATIONALE_MODEL=gemini-2.5-flash
+```
+
+Vertex AI example using Google Cloud credits:
+
+```bash
+gcloud auth application-default login
+gcloud auth application-default set-quota-project <your-google-cloud-project-id>
+```
+
+```dotenv
+LLM_PROVIDER=vertex_ai
+VERTEX_PROJECT_ID=<your-google-cloud-project-id>
+VERTEX_LOCATION=global
+LLM_DECOMPOSITION_MODEL=google/gemini-2.5-flash
+LLM_RATIONALE_MODEL=google/gemini-2.5-flash
+```
+
+Smoke test with Vertex AI and mock calendar:
+
+```bash
+CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai streamlit run src/app.py
+```
+
+OpenAI-compatible example for Groq/OpenRouter-style endpoints:
+
+```dotenv
+LLM_PROVIDER=openai_compatible
+LLM_API_KEY=<provider key>
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_DECOMPOSITION_MODEL=<provider model>
+LLM_RATIONALE_MODEL=<provider model>
+```
 
 ## Testing Rules
 
-- Mock LLM calls through `_call_anthropic`.
+- Mock LLM calls through `_call_llm`, `_call_anthropic`, or `_post_json`.
 - Mock Google Calendar service calls in tests.
 - Do not require live credentials for unit tests.
 - Keep heuristics and validator pure and easy to unit-test.
@@ -75,14 +125,9 @@ Use `CALENDAR_MODE=mock` unless explicitly testing live Google Calendar behavior
 
 Current high-value work:
 
-1. Replace no-op tests in:
-   - `tests/test_validator.py`
-   - `tests/test_calendar_api.py`
-   - `tests/test_orchestration.py::TestValidateCandidates`
-2. Run and document the full mock-mode app walkthrough.
-3. Decide whether to keep or refactor the approval/resume contract.
-4. Reconcile dependency version ranges between `requirements.txt` and `pyproject.toml`.
-5. Verify live Google Calendar mode or explicitly defer it.
+1. Run and document the full mock-mode app walkthrough.
+2. Verify Gemini or another low-cost live LLM provider.
+3. Verify live Google Calendar mode or explicitly defer it.
 
 ## Safety Checklist
 

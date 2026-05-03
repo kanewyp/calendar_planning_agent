@@ -153,8 +153,9 @@ Validator logic must remain deterministic and pure.
 ## LLM Rules
 
 - All LLM calls go through `src/llm_client/client.py`.
-- Current model: `claude-sonnet-4-20250514`.
-- Tests must mock `_call_anthropic`; never make real LLM calls in tests.
+- Supported providers: `anthropic`, `gemini`, `vertex_ai`, `openai_compatible`, and `mock`.
+- Goal decomposition and rationale generation can use separate configured models.
+- Tests must mock provider calls; never make real LLM calls in tests.
 
 ## Frontend Flow
 
