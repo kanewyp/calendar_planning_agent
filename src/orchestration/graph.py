@@ -234,6 +234,7 @@ def run_graph_until_approval(
         "work_start",
         "work_end",
         "max_session_minutes",
+        "energy_levels",
     }
     missing = required_keys - set(user_inputs)
     if missing:
@@ -266,6 +267,7 @@ def run_graph_until_approval(
         "work_start": work_start_value,
         "work_end": work_end_value,
         "max_session_minutes": int(user_inputs["max_session_minutes"]),
+        "energy_levels": dict(user_inputs["energy_levels"]),
         "selected_strategy": None,
         "user_approved": None,
     }

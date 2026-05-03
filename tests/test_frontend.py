@@ -61,8 +61,8 @@ def _patch_intake_streamlit(
     monkeypatch.setattr(intake_form.st, "date_input", lambda *args, **kwargs: deadline)
     monkeypatch.setattr(intake_form.st, "text_area", lambda *args, **kwargs: context)
 
-    def _columns(_count: int):
-        return (_DummyColumn(), _DummyColumn())
+    def _columns(count: int):
+        return tuple(_DummyColumn() for _ in range(count))
 
     monkeypatch.setattr(intake_form.st, "columns", _columns)
 
@@ -72,6 +72,12 @@ def _patch_intake_streamlit(
         intake_form.st,
         "number_input",
         lambda *args, **kwargs: max_session_minutes,
+    )
+    energy_values = iter(("high", "medium", "low"))
+    monkeypatch.setattr(
+        intake_form.st,
+        "selectbox",
+        lambda *args, **kwargs: next(energy_values),
     )
     monkeypatch.setattr(
         intake_form.st,

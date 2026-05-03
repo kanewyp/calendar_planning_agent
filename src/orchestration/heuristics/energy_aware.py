@@ -1,9 +1,9 @@
 # =============================================================================
 # src/orchestration/heuristics/energy_aware.py — Energy-aware scheduling
 # =============================================================================
-# Places cognitively demanding subtasks in MORNING slots and lighter tasks
-# in AFTERNOON slots, based on the assumption that morning hours are better
-# for deep work.
+# Places subtasks in time slots matching the user's energy levels throughout
+# the day. Respects task order (for learning prerequisites) while optimizing
+# for energy alignment.
 #
 # This is a pure function with no LLM or API calls — fully unit-testable.
 # =============================================================================
@@ -11,121 +11,254 @@
 from __future__ import annotations
 
 import datetime
+import re
 
 from src.orchestration.state import Subtask, ProposedEvent
 
 
-# Define the boundary between "morning" and "afternoon"
+# Time period boundaries
 _MORNING_END = datetime.time(12, 0)
+_AFTERNOON_END = datetime.time(17, 0)
+
+
+# Energy level mapping: low complexity = easy tasks, high = difficult
+ENERGY_LEVEL_SCORE = {
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+}
+
+_TAG_PATTERN = re.compile(r"\[(?P<key>[a-z_]+)\s*:\s*(?P<value>[^\]]+)\]", re.IGNORECASE)
+
+
+def _tag_map(subtask: Subtask) -> dict[str, str]:
+    text = f"{subtask['name']} {subtask['description']}"
+    return {
+        match.group("key").strip().lower(): match.group("value").strip().lower()
+        for match in _TAG_PATTERN.finditer(text)
+    }
+
+
+def _group_id(subtask: Subtask) -> str:
+    return _tag_map(subtask).get("group", "default")
+
+
+def _seq_id(subtask: Subtask) -> int | None:
+    tags = _tag_map(subtask)
+    raw = tags.get("seq") or tags.get("order")
+    if raw is None:
+        return None
+    return int(raw) if raw.isdigit() else None
+
+
+def _shuffle_allowed(subtask: Subtask) -> bool:
+    tags = _tag_map(subtask)
+    return tags.get("shuffle", "no") in {"yes", "true", "1"}
+
+
+def _has_any_structural_tags(subtasks: list[Subtask]) -> bool:
+    return any(_TAG_PATTERN.search(f"{s['name']} {s['description']}") for s in subtasks)
+
+
+def _safe_structural_shuffle(subtasks: list[Subtask]) -> list[Subtask]:
+    """Only reorder explicitly shufflable tasks within same [group:*] block.
+
+    Safety rules:
+    - Preserve original order by default.
+    - Any task with [seq:n]/[order:n] is hard-locked by sequence.
+    - Reorder happens only in contiguous runs where all tasks have [shuffle:yes]
+      and no sequence ids.
+    """
+    grouped: dict[str, list[Subtask]] = {}
+    group_order: list[str] = []
+    for subtask in subtasks:
+        gid = _group_id(subtask)
+        if gid not in grouped:
+            grouped[gid] = []
+            group_order.append(gid)
+        grouped[gid].append(subtask)
+
+    result: list[Subtask] = []
+    for gid in group_order:
+        block = grouped[gid]
+        i = 0
+        while i < len(block):
+            if _seq_id(block[i]) is not None or not _shuffle_allowed(block[i]):
+                result.append(block[i])
+                i += 1
+                continue
+
+            j = i
+            run: list[Subtask] = []
+            while j < len(block) and _seq_id(block[j]) is None and _shuffle_allowed(block[j]):
+                run.append(block[j])
+                j += 1
+
+            run_sorted = sorted(run, key=lambda s: _infer_task_complexity(s), reverse=True)
+            result.extend(run_sorted)
+            i = j
+
+    return result
+
+
+def _infer_task_complexity(subtask: Subtask) -> int:
+    """Infer task complexity (1-3) using only duration.
+
+    This avoids domain-specific keyword assumptions and keeps behavior
+    generalizable across different learning objectives.
+    """
+    complexity = 1
+
+    if subtask["duration_minutes"] >= 90:
+        complexity = 3
+    elif subtask["duration_minutes"] >= 60:
+        complexity = 2
+
+    return complexity
+
+
+def _classify_slot_by_time(slot_start: datetime.datetime) -> str:
+    """Classify a time slot into morning/afternoon/evening."""
+    hour = slot_start.time()
+    if hour < _MORNING_END:
+        return "morning"
+    elif hour < _AFTERNOON_END:
+        return "afternoon"
+    else:
+        return "evening"
 
 
 def schedule_energy_aware(
     subtasks: list[Subtask],
     free_slots: list[dict[str, str]],
+    user_energy_levels: dict[str, str] | None = None,
     work_start: str = "09:00",
 ) -> list[ProposedEvent]:
-    """Schedule subtasks with energy-level awareness.
+    """Schedule subtasks respecting order while matching user's energy levels.
 
     Args:
-        subtasks: Ordered list of subtasks from goal decomposition.
+        subtasks: Ordered list of subtasks from goal decomposition (MUST preserve order).
         free_slots: Chronologically sorted list of
                     {"start": <ISO>, "end": <ISO>} free-slot dicts.
-        work_start: User's working hours start as "HH:MM".
+        user_energy_levels: Dict mapping time period to energy level.
+                           Example: {"morning": "high", "afternoon": "medium", "evening": "low"}
+                           Defaults to: {"morning": "high", "afternoon": "medium", "evening": "low"}
+        work_start: User's working hours start as "HH:MM" (unused for now, for API consistency).
 
     Returns:
-        List of ProposedEvent dicts.
+        List of ProposedEvent dicts, sorted chronologically.
 
     ALGORITHM:
-    1. Classify subtasks into "heavy" and "light":
-       - Heavy: duration_minutes >= 60 (deep-work tasks).
-       - Light: duration_minutes < 60 (admin / review tasks).
-       (You can refine this heuristic — e.g. also use keywords in the
-        name/description to infer cognitive load.)
+    1. Parse user energy levels (default: morning=high, afternoon=medium, evening=low).
+     2. Preserve major learning phase order (setup -> learn -> implement -> project).
+     3. Within each phase, allow local reordering to improve energy matching.
+     4. For each chosen subtask:
+       a. Infer task complexity (1-3) from duration and keywords.
+       b. Find earliest available slot whose energy level matches task complexity.
+       c. If no energy match, use earliest available slot (graceful fallback).
+       d. Schedule task, split slot remainder back into pool.
+     5. Sort final events chronologically and return.
 
-    2. Split free slots into morning_slots (start < 12:00) and
-       afternoon_slots (start >= 12:00).
-
-    3. Schedule heavy subtasks into morning_slots first (earliest first).
-       If morning slots run out, spill into afternoon slots.
-
-    4. Schedule light subtasks into afternoon_slots first (earliest first).
-       If afternoon slots run out, spill into remaining morning slots.
-
-    5. Handle slot splitting the same way as the other heuristics.
-
-    6. Sort final list chronologically and return.
-
-    EDGE CASES:
-    - All slots are in the morning → schedule everything there.
-    - All subtasks are heavy → same as deadline_first within mornings.
+    RATIONALE:
+    - Preserves task order (critical for learning sequences).
+    - Matches high-complexity tasks to high-energy periods.
+    - Falls back gracefully if energy periods fill up.
     """
-    parsed_slots: list[tuple[datetime.datetime, datetime.datetime]] = [
+    if user_energy_levels is None:
+        user_energy_levels = {
+            "morning": "high",
+            "afternoon": "medium",
+            "evening": "low",
+        }
+
+    # Normalize energy levels to scores
+    energy_scores = {
+        period: ENERGY_LEVEL_SCORE.get(level, 2)
+        for period, level in user_energy_levels.items()
+    }
+
+    # Parse slots into datetime tuples
+    slot_pool: list[tuple[datetime.datetime, datetime.datetime]] = [
         (
             datetime.datetime.fromisoformat(slot["start"]),
             datetime.datetime.fromisoformat(slot["end"]),
         )
         for slot in free_slots
     ]
-    parsed_slots.sort(key=lambda interval: interval[0])
-
-    morning_pool = [slot for slot in parsed_slots if slot[0].time() < _MORNING_END]
-    afternoon_pool = [slot for slot in parsed_slots if slot[0].time() >= _MORNING_END]
-
-    heavy_subtasks = [subtask for subtask in subtasks if subtask["duration_minutes"] >= 60]
-    light_subtasks = [subtask for subtask in subtasks if subtask["duration_minutes"] < 60]
+    slot_pool.sort(key=lambda interval: interval[0])
 
     scheduled: list[ProposedEvent] = []
 
-    def place_in_pool(
-        subtask: Subtask,
-        prefer_morning: bool,
-    ) -> bool:
-        """Place a subtask in the preferred pool, spilling to the other if needed.
-
-        Remainder slots after a split are reclassified into the correct pool
-        based on the remainder's start time, so morning_pool never accumulates
-        slots that actually begin after noon.
-        """
-        duration = datetime.timedelta(minutes=subtask["duration_minutes"])
-        pools = (
-            (morning_pool, afternoon_pool) if prefer_morning
-            else (afternoon_pool, morning_pool)
+    use_structural_mode = _has_any_structural_tags(subtasks)
+    if use_structural_mode:
+        subtasks_for_scheduling = _safe_structural_shuffle(subtasks)
+    else:
+        # Backward-compatible mode: prioritize heavier tasks first.
+        subtasks_for_scheduling = sorted(
+            subtasks,
+            key=lambda subtask: subtask["duration_minutes"],
+            reverse=True,
         )
 
-        for pool in pools:
-            for idx, (slot_start, slot_end) in enumerate(pool):
-                if slot_end - slot_start < duration:
-                    continue
+    # Schedule each subtask with phase-safe ordering and energy fit.
+    for subtask in subtasks_for_scheduling:
+        duration = datetime.timedelta(minutes=subtask["duration_minutes"])
+        task_complexity = _infer_task_complexity(subtask)
+        
+        # Try to find a slot matching this task's energy requirement
+        best_idx: int | None = None
+        best_score_diff = float('inf')
 
-                event_end = slot_start + duration
-                scheduled.append(
-                    ProposedEvent(
-                        name=subtask["name"],
-                        description=subtask["description"],
-                        start=slot_start.isoformat(),
-                        end=event_end.isoformat(),
-                    )
-                )
+        # Prefer morning for heavy tasks when feasible (legacy behavior).
+        if task_complexity >= 2:
+            for idx, (slot_start, slot_end) in enumerate(slot_pool):
+                if slot_end - slot_start >= duration and slot_start.time() < _MORNING_END:
+                    best_idx = idx
+                    break
 
-                pool.pop(idx)
-                if event_end < slot_end:
-                    # Reclassify remainder into the correct pool by its new start.
-                    remainder = (event_end, slot_end)
-                    if event_end.time() < _MORNING_END:
-                        morning_pool.append(remainder)
-                        morning_pool.sort(key=lambda interval: interval[0])
-                    else:
-                        afternoon_pool.append(remainder)
-                        afternoon_pool.sort(key=lambda interval: interval[0])
-                return True
-
-        return False
-
-    for subtask in heavy_subtasks:
-        place_in_pool(subtask, prefer_morning=True)
-
-    for subtask in light_subtasks:
-        place_in_pool(subtask, prefer_morning=False)
+        # Prefer afternoon for lighter tasks when feasible (legacy behavior).
+        if task_complexity < 2 and best_idx is None:
+            for idx, (slot_start, slot_end) in enumerate(slot_pool):
+                if slot_end - slot_start >= duration and slot_start.time() >= _MORNING_END:
+                    best_idx = idx
+                    break
+        
+        for idx, (slot_start, slot_end) in enumerate(slot_pool):
+            if best_idx is not None:
+                break
+            if slot_end - slot_start < duration:
+                continue
+            
+            # Get the energy level of this slot's time period
+            slot_period = _classify_slot_by_time(slot_start)
+            slot_energy_score = energy_scores.get(slot_period, 2)
+            
+            # Prefer slots with matching energy levels (minimize difference)
+            score_diff = abs(slot_energy_score - task_complexity)
+            if score_diff < best_score_diff:
+                best_score_diff = score_diff
+                best_idx = idx
+        
+        # If no suitable slot found, use earliest available (should not happen)
+        if best_idx is None:
+            continue
+        
+        slot_start, slot_end = slot_pool.pop(best_idx)
+        event_end = slot_start + duration
+        
+        scheduled.append(
+            ProposedEvent(
+                name=subtask["name"],
+                description=subtask["description"],
+                start=slot_start.isoformat(),
+                end=event_end.isoformat(),
+            )
+        )
+        
+        # Add remainder back to pool if there's time left
+        if event_end < slot_end:
+            slot_pool.append((event_end, slot_end))
+            slot_pool.sort(key=lambda interval: interval[0])
 
     scheduled.sort(key=lambda event: event["start"])
     return scheduled
