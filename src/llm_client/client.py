@@ -55,6 +55,16 @@ def _model_for_purpose(provider: str, purpose: str) -> str:
     )
 
 
+def get_llm_metadata(purpose: str) -> dict[str, str]:
+    """Return provider/model metadata for trace output without exposing secrets."""
+    provider = _normalize_provider()
+    return {
+        "provider": provider,
+        "model": _model_for_purpose(provider, purpose),
+        "purpose": purpose,
+    }
+
+
 def _api_key_for_provider(provider: str) -> str:
     if provider == "anthropic":
         return settings.LLM_API_KEY or settings.ANTHROPIC_API_KEY

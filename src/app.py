@@ -32,6 +32,7 @@ import streamlit as st
 from src.frontend.intake_form import render_intake_form
 from src.frontend.schedule_display import render_all_candidates
 from src.frontend.approval_controls import render_strategy_buttons
+from src.frontend.debug_panel import render_debug_trace
 from src.orchestration.graph import build_graph, run_graph_until_approval, resume_graph
 
 
@@ -160,6 +161,7 @@ def main() -> None:
         return
 
       render_all_candidates(graph_state)
+      render_debug_trace(graph_state)
       action, strategy_name = render_strategy_buttons(
         graph_state.get("candidates_identical", False)
       )
@@ -199,6 +201,10 @@ def main() -> None:
       result_message = st.session_state.get("result")
       if result_message:
         st.success(result_message)
+
+      graph_state = st.session_state.get("graph_state")
+      if graph_state:
+        render_debug_trace(graph_state)
 
       if st.button("Start over", type="primary"):
         for key in ["graph_state", "graph", "user_inputs", "result"]:

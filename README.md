@@ -10,8 +10,8 @@ approval before writing anything to the calendar.
 The current integration branch has the core mock-mode application flow implemented:
 configurable LLM client wrappers, calendar wrappers, free-slot computation,
 mock calendar, validator, heuristics, graph nodes, Streamlit UI, approval
-controls, and app session flow. `.venv/bin/pytest -q` currently reports
-`58 passed`.
+controls, debug trace panel, and app session flow. `.venv/bin/pytest -q`
+currently reports `59 passed`.
 
 Remaining validation work includes a full `CALENDAR_MODE=mock` Streamlit
 walkthrough reject-path check and live Google Calendar verification. A

@@ -13,7 +13,8 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
 
 class Subtask(TypedDict):
@@ -42,6 +43,16 @@ class ValidationResult(TypedDict):
     """Output of the deterministic validator."""
     passed: bool
     violations: list[Violation]
+
+
+class DebugTraceEvent(TypedDict, total=False):
+    """A compact observability event produced by a graph node."""
+    node: str
+    status: str
+    created_at: str
+    duration_ms: int
+    summary: dict[str, Any]
+    details: dict[str, Any]
 
 
 class AgentState(TypedDict, total=False):
@@ -96,3 +107,7 @@ class AgentState(TypedDict, total=False):
 
     # --- Write result ---
     write_results: list[dict[str, Any]]         # API responses from event creation
+
+    # --- Debug trace ---
+    # One compact trace event per node. The reducer lets parallel branches append.
+    debug_trace: Annotated[list[DebugTraceEvent], operator.add]

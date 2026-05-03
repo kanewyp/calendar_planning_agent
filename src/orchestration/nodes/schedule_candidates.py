@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.orchestration.debug_trace import make_trace_event, summarize_schedule, trace_update
 from src.orchestration.state import AgentState
 from src.orchestration.heuristics.deadline_first import schedule_deadline_first
 from src.orchestration.heuristics.minimize_fragmentation import schedule_min_fragmentation
@@ -38,9 +39,14 @@ def deadline_first_node(state: AgentState) -> dict[str, Any]:
             "deadline_first_node: missing subtasks/free_slots list in state"
         )
 
-    return {
-        "candidate_deadline_first": schedule_deadline_first(subtasks, free_slots)
-    }
+    candidate = schedule_deadline_first(subtasks, free_slots)
+    return _candidate_update(
+        "deadline_first",
+        "candidate_deadline_first",
+        candidate,
+        subtask_count=len(subtasks),
+        free_slot_count=len(free_slots),
+    )
 
 
 def min_fragmentation_node(state: AgentState) -> dict[str, Any]:
@@ -59,9 +65,14 @@ def min_fragmentation_node(state: AgentState) -> dict[str, Any]:
             "min_fragmentation_node: missing subtasks/free_slots list in state"
         )
 
-    return {
-        "candidate_min_fragmentation": schedule_min_fragmentation(subtasks, free_slots)
-    }
+    candidate = schedule_min_fragmentation(subtasks, free_slots)
+    return _candidate_update(
+        "min_fragmentation",
+        "candidate_min_fragmentation",
+        candidate,
+        subtask_count=len(subtasks),
+        free_slot_count=len(free_slots),
+    )
 
 
 def energy_aware_node(state: AgentState) -> dict[str, Any]:
@@ -84,10 +95,36 @@ def energy_aware_node(state: AgentState) -> dict[str, Any]:
             "energy_aware_node: work_start missing or not a HH:MM string"
         )
 
-    return {
-        "candidate_energy_aware": schedule_energy_aware(
-            subtasks,
-            free_slots,
-            work_start=work_start_raw,
-        )
-    }
+    candidate = schedule_energy_aware(
+        subtasks,
+        free_slots,
+        work_start=work_start_raw,
+    )
+    return _candidate_update(
+        "energy_aware",
+        "candidate_energy_aware",
+        candidate,
+        subtask_count=len(subtasks),
+        free_slot_count=len(free_slots),
+    )
+
+
+def _candidate_update(
+    strategy_name: str,
+    state_key: str,
+    candidate: list[dict[str, Any]],
+    *,
+    subtask_count: int,
+    free_slot_count: int,
+) -> dict[str, Any]:
+    trace = make_trace_event(
+        f"schedule_{strategy_name}",
+        summary={
+            "strategy": strategy_name,
+            "scheduled_event_count": len(candidate),
+            "unscheduled_subtask_count": max(subtask_count - len(candidate), 0),
+            "free_slot_count": free_slot_count,
+        },
+        details=summarize_schedule(candidate),
+    )
+    return {state_key: candidate, **trace_update(trace)}

@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.llm_client.client import call_llm_text
+from src.llm_client.client import call_llm_text, get_llm_metadata
+from src.orchestration.debug_trace import make_trace_event, trace_update
 from src.orchestration.state import AgentState
 
 
@@ -143,4 +144,19 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
                 f"Rationale generation failed for strategy '{strategy_name}'"
             ) from exc
 
-    return {"candidate_rationales": rationales}
+    trace = make_trace_event(
+        "generate_rationales",
+        summary={
+            **get_llm_metadata("rationale"),
+            "rationale_count": len(rationales),
+        },
+        details={
+            strategy: {
+                "character_count": len(rationale),
+                "word_count": len(rationale.split()),
+            }
+            for strategy, rationale in rationales.items()
+        },
+    )
+
+    return {"candidate_rationales": rationales, **trace_update(trace)}
