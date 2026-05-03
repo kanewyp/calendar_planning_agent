@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.llm_client.client import call_llm_json
+from src.llm_client.client import call_llm_json, get_llm_metadata
+from src.orchestration.debug_trace import make_trace_event, summarize_subtasks, trace_update
 from src.orchestration.state import AgentState, Subtask
 
 
@@ -131,4 +132,14 @@ def decompose_goal_node(state: AgentState) -> dict[str, Any]:
             )
         )
 
-    return {"subtasks": subtasks}
+    trace = make_trace_event(
+        "decompose_goal",
+        summary={
+            "goal": state["goal"],
+            "deadline": state["deadline"],
+            **get_llm_metadata("decomposition"),
+        },
+        details=summarize_subtasks(subtasks),
+    )
+
+    return {"subtasks": subtasks, **trace_update(trace)}

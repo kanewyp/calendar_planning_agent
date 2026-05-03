@@ -16,6 +16,11 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
+from src.orchestration.debug_trace import (
+   make_trace_event,
+   summarize_validations,
+   trace_update,
+)
 from src.orchestration.state import AgentState
 from src.validator.constraints import validate_schedule
 
@@ -103,4 +108,16 @@ def validate_candidates_node(state: AgentState) -> dict[str, Any]:
       ),
    }
 
-   return {"candidate_validations": validations}
+   trace = make_trace_event(
+      "validate_candidates",
+      summary={
+         strategy: {
+            "passed": validation["passed"],
+            "violation_count": len(validation["violations"]),
+         }
+         for strategy, validation in validations.items()
+      },
+      details=summarize_validations(validations),
+   )
+
+   return {"candidate_validations": validations, **trace_update(trace)}

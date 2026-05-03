@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.orchestration.debug_trace import make_trace_event, trace_update
 from src.orchestration.state import AgentState, ProposedEvent
 
 
@@ -83,4 +84,14 @@ def build_proposal_node(state: AgentState) -> dict[str, Any]:
         signatures.append(signature)
 
     candidates_identical = signatures[0] == signatures[1] == signatures[2]
-    return {"candidates_identical": candidates_identical}
+    trace = make_trace_event(
+        "build_proposal",
+        summary={"candidates_identical": candidates_identical},
+        details={
+            "candidate_event_counts": {
+                key: len(state[key])
+                for key in candidate_keys
+            }
+        },
+    )
+    return {"candidates_identical": candidates_identical, **trace_update(trace)}

@@ -27,7 +27,7 @@ Current command:
 Current result:
 
 ```text
-58 passed
+59 passed
 ```
 
 The previous no-op `pass # TODO` tests in `tests/test_validator.py`,
@@ -45,8 +45,20 @@ assertive unit tests.
   - startup/import issue for `streamlit run src/app.py` has been fixed
 - `CALENDAR_MODE=mock LLM_PROVIDER=mock` graph smoke test passes without live LLM or Google credentials.
 - `CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai` Streamlit approve-path smoke test passes with Google Cloud ADC and creates mock calendar events.
+- Debug trace is captured in graph state and shown in Streamlit review/done views for local troubleshooting.
 - Verify Gemini API or another API-key-based low-cost provider only if policy allows API keys.
 - Verify live Google Calendar mode with real OAuth credentials, or explicitly defer it.
+
+## Debug Trace
+
+Current behavior:
+
+- `AgentState["debug_trace"]` accumulates compact per-node trace events.
+- Trace events include node name, status, timestamp, summaries, and safe details.
+- Decomposition trace records LLM provider/model and subtask summaries.
+- Calendar, heuristic, validation, rationale, proposal, approval, and write nodes record compact counts and selected outputs.
+- Streamlit review/done pages expose a "Debug trace" expander with a compact report and raw JSON.
+- Full prompt/response bodies are not stored by default.
 
 ## LLM Providers
 

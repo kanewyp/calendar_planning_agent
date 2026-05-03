@@ -51,6 +51,7 @@ Walkthrough to record:
 2. Confirm all candidate schedules render.
 3. Approve one strategy and confirm mock events are created.
 4. Restart and reject all, confirming no writes.
+5. Expand "Debug trace" and copy the compact report if a schedule looks wrong.
 
 ## Environment Variables
 
@@ -120,6 +121,25 @@ LLM_RATIONALE_MODEL=<provider model>
 - Do not require live credentials for unit tests.
 - Keep heuristics and validator pure and easy to unit-test.
 - When adding state fields, update `src/orchestration/state.py` first.
+
+## Debug Trace
+
+During review and done phases, Streamlit shows a "Debug trace" expander. Use it
+to inspect the graph's intermediate outputs without digging through terminal
+logs. The compact report is designed to paste into issues or debugging threads.
+
+Trace currently includes:
+
+- goal decomposition provider/model and subtask summaries
+- busy/free calendar slot counts
+- each heuristic's scheduled and unscheduled counts
+- validation pass/fail and violation counts per strategy
+- rationale generation provider/model and text lengths
+- proposal duplicate detection
+- approval decision and selected strategy
+- calendar write mode and written event count
+
+Prompt and response bodies are intentionally omitted by default.
 
 ## Development Priorities
 

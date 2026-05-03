@@ -94,6 +94,18 @@ def _approval_decision(state: AgentState) -> str:
     return END
 
 
+def _apply_node_updates(state: AgentState, updates: dict[str, Any]) -> None:
+    """Apply node updates outside LangGraph while preserving reducer semantics."""
+    trace_updates = updates.get("debug_trace")
+    if trace_updates:
+        state.setdefault("debug_trace", [])
+        state["debug_trace"].extend(trace_updates)
+
+    for key, value in updates.items():
+        if key != "debug_trace":
+            state[key] = value
+
+
 def build_graph() -> StateGraph:
     """Construct and compile the LangGraph directed graph.
 
@@ -318,10 +330,10 @@ def resume_graph(
         resumed_state["selected_strategy"] = None
 
     approval_updates = human_approval_node(resumed_state)
-    resumed_state.update(approval_updates)
+    _apply_node_updates(resumed_state, approval_updates)
 
     if _approval_decision(resumed_state) == "write_events":
         write_updates = write_events_node(resumed_state)
-        resumed_state.update(write_updates)
+        _apply_node_updates(resumed_state, write_updates)
 
     return resumed_state

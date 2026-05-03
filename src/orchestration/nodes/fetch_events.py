@@ -15,6 +15,7 @@ from typing import Any
 
 from config.settings import settings
 from src.calendar_api.free_slots import compute_free_slots
+from src.orchestration.debug_trace import make_trace_event, trace_update
 from src.orchestration.state import AgentState
 
 
@@ -95,7 +96,23 @@ def fetch_events_node(state: AgentState) -> dict[str, Any]:
       work_end=work_end,
    )
 
+   trace = make_trace_event(
+      "fetch_events",
+      summary={
+         "calendar_mode": settings.CALENDAR_MODE,
+         "busy_block_count": len(busy_blocks),
+         "free_slot_count": len(free_slots),
+      },
+      details={
+         "horizon_start": time_min.isoformat(),
+         "horizon_end": time_max.isoformat(),
+         "work_start": work_start.isoformat(timespec="minutes"),
+         "work_end": work_end.isoformat(timespec="minutes"),
+      },
+   )
+
    return {
       "busy_blocks": busy_blocks,
       "free_slots": free_slots,
+      **trace_update(trace),
    }
