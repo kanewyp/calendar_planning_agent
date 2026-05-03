@@ -79,13 +79,14 @@ def energy_aware_node(state: AgentState) -> dict[str, Any]:
     """LangGraph node: produce a candidate via the energy-aware heuristic.
 
     STEPS:
-    1. Extract subtasks, free_slots, and work_start from state.
-    2. Call schedule_energy_aware(subtasks, free_slots, work_start).
+    1. Extract subtasks, free_slots, work_start, and energy_levels from state.
+    2. Call schedule_energy_aware(subtasks, free_slots, energy_levels).
     3. Return {"candidate_energy_aware": result}.
     """
     subtasks = state.get("subtasks")
     free_slots = state.get("free_slots")
     work_start_raw = state.get("work_start")
+    energy_levels = state.get("energy_levels")
 
     if not isinstance(subtasks, list) or not isinstance(free_slots, list):
         raise ValueError("energy_aware_node: missing subtasks/free_slots list in state")
@@ -98,6 +99,7 @@ def energy_aware_node(state: AgentState) -> dict[str, Any]:
     candidate = schedule_energy_aware(
         subtasks,
         free_slots,
+        user_energy_levels=energy_levels,
         work_start=work_start_raw,
     )
     return _candidate_update(

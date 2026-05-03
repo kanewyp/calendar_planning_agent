@@ -16,6 +16,8 @@ from src.llm_client.client import call_llm_json, get_llm_metadata
 from src.orchestration.debug_trace import make_trace_event, summarize_subtasks, trace_update
 from src.orchestration.state import AgentState, Subtask
 
+import sys
+
 
 # ---------------------------------------------------------------------------
 # Prompt template for goal decomposition
@@ -28,9 +30,19 @@ RULES:
 - Each element must be an object with exactly three fields:
     "name"             (string): short title for the subtask
     "description"      (string): 1–2 sentences describing what the work involves
-    "duration_minutes" (integer): estimated focused-work time in minutes
+    "duration_minutes" (integer): estimated focused-work time in minutes (NOT "duration", use "duration_minutes")
+- Field names are case-sensitive. Do NOT use "duration" or "time" — use "duration_minutes".
 - Subtasks must reflect genuine domain knowledge, be ordered logically, and
   be sized realistically for focused work sessions.
+- Preserve dependency-safe learning flow. Do not place prerequisites after dependents.
+- At the START of each description, include structural tags used by the scheduler:
+    [group:<block_id>] [seq:<integer>] [shuffle:yes|no]
+    Rules for tags:
+    - group: same value for tasks in the same major block
+    - seq: strict order inside the block (1, 2, 3, ...)
+    - shuffle: use "no" for dependency-critical tasks; only use "yes" for tasks
+        that are truly interchangeable without affecting learning logic.
+- Keep these tags concise and machine-readable; keep normal description text after tags.
 - No single subtask should exceed {max_session} minutes.
 - The total estimated time should be achievable before the deadline.
 - Avoid generic filler tasks like "review progress" unless truly needed.
@@ -39,6 +51,12 @@ USER GOAL: {goal}
 DEADLINE: {deadline}
 BACKGROUND CONTEXT: {context}
 MAX SESSION LENGTH: {max_session} minutes
+
+EXAMPLE JSON FORMAT (follow this exactly):
+[
+    {{"name": "Learn basics", "description": "[group:foundations] [seq:1] [shuffle:no] Read docs.", "duration_minutes": 60}},
+    {{"name": "Build project", "description": "[group:project] [seq:1] [shuffle:no] Write code.", "duration_minutes": 90}}
+]
 """
 
 
@@ -72,8 +90,18 @@ def decompose_goal_node(state: AgentState) -> dict[str, Any]:
     try:
         raw = call_llm_json(prompt, purpose="decomposition")
     except Exception as exc:
+        # Print full error details to stderr for debugging
+        import traceback
+        error_msg = f"\n{'='*70}\nDEBUG: LLM Call Failed\n{'='*70}\n"
+        error_msg += f"Provider: {get_llm_metadata('decomposition')}\n"
+        error_msg += f"Error Type: {type(exc).__name__}\n"
+        error_msg += f"Error Message: {str(exc)}\n"
+        error_msg += f"Traceback:\n{traceback.format_exc()}\n"
+        error_msg += "="*70 + "\n"
+        print(error_msg, file=sys.stderr)
+        
         raise RuntimeError(
-            "Goal decomposition failed: unable to get a valid subtask list from the LLM"
+            f"Goal decomposition failed: {str(exc)}"
         ) from exc
 
     if not isinstance(raw, list) or not raw:
@@ -88,6 +116,11 @@ def decompose_goal_node(state: AgentState) -> dict[str, Any]:
             raise ValueError(
                 f"Goal decomposition failed: subtask {index} is not an object"
             )
+
+        # Normalize field names: handle common LLM variations
+        # Some models return "duration" instead of "duration_minutes"
+        if "duration" in item and "duration_minutes" not in item:
+            item["duration_minutes"] = item.pop("duration")
 
         missing_keys = required_keys - set(item)
         extra_keys = set(item) - required_keys

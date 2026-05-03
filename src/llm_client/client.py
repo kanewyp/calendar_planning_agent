@@ -30,6 +30,28 @@ VERTEX_OPENAI_BASE_URL_TEMPLATE = (
 MAX_RETRIES = 2
 
 
+def _parse_json_with_recovery(text: str) -> Any:
+    """Parse JSON from model output, tolerating trailing/leading extra text.
+
+    Many providers occasionally prepend/append short non-JSON snippets even when
+    instructed not to. This function first tries strict parsing; if that fails,
+    it extracts the first decodable JSON value from the first '{' or '[' onward.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    start_candidates = [idx for idx in (text.find("["), text.find("{")) if idx != -1]
+    if not start_candidates:
+        raise json.JSONDecodeError("No JSON object or array found", text, 0)
+
+    start = min(start_candidates)
+    parsed, _end = decoder.raw_decode(text[start:])
+    return parsed
+
+
 def _normalize_provider(provider: str | None = None) -> str:
     return (provider or settings.LLM_PROVIDER or "anthropic").strip().lower()
 
@@ -279,7 +301,7 @@ def call_llm_json(
                 purpose=purpose,
                 temperature=temperature,
             ).strip()
-            return json.loads(response_text)
+            return _parse_json_with_recovery(response_text)
         except json.JSONDecodeError as exc:
             last_error = exc
             current_prompt = (

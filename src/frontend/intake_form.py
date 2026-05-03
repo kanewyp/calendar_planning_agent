@@ -25,6 +25,7 @@ class UserInputs(TypedDict):
     work_start: datetime.time       # Preferred working hours — start
     work_end: datetime.time         # Preferred working hours — end
     max_session_minutes: int        # Maximum single-session length
+    energy_levels: dict[str, str]   # {"morning": "high", "afternoon": "medium", "evening": "low"}
 
 
 def render_intake_form() -> UserInputs | None:
@@ -77,6 +78,31 @@ def render_intake_form() -> UserInputs | None:
             value=90,
             step=15,
         )
+        
+        st.markdown("**Your energy levels by time of day:**")
+        col_morning, col_afternoon, col_evening = st.columns(3)
+        with col_morning:
+            morning_energy = st.selectbox(
+                "Morning",
+                options=["high", "medium", "low"],
+                index=0,
+                key="morning_energy",
+            )
+        with col_afternoon:
+            afternoon_energy = st.selectbox(
+                "Afternoon",
+                options=["high", "medium", "low"],
+                index=1,
+                key="afternoon_energy",
+            )
+        with col_evening:
+            evening_energy = st.selectbox(
+                "Evening",
+                options=["high", "medium", "low"],
+                index=2,
+                key="evening_energy",
+            )
+        
         submitted = st.form_submit_button("Plan my schedule", type="primary")
 
     if not submitted:
@@ -101,4 +127,9 @@ def render_intake_form() -> UserInputs | None:
         work_start=work_start,
         work_end=work_end,
         max_session_minutes=int(max_session_minutes),
+        energy_levels={
+            "morning": morning_energy,
+            "afternoon": afternoon_energy,
+            "evening": evening_energy,
+        },
     )

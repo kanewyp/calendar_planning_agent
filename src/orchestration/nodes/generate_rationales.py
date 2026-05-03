@@ -21,9 +21,18 @@ from src.orchestration.state import AgentState
 
 
 STRATEGY_DESCRIPTIONS = {
-    "deadline_first": "Finish as early as possible to maximise buffer before the deadline.",
-    "min_fragmentation": "Keep free time contiguous by filling largest slots first.",
-    "energy_aware": "Place demanding tasks in the morning, lighter ones in the afternoon.",
+    "deadline_first": (
+        "Finish as early as possible to maximize deadline buffer, ignore energy preferences, "
+        "respect per-day available work hours, and preserve strict logical/dependency order."
+    ),
+    "min_fragmentation": (
+        "Reduce context switching by favoring contiguous blocks while preserving major learning "
+        "phase order; allow only dependency-safe local reordering within a phase."
+    ),
+    "energy_aware": (
+        "Use user-provided morning/afternoon/evening energy levels and daily work-hour constraints; "
+        "preserve overall learning flow and reorder only dependency-safe subtasks."
+    ),
 }
 
 RATIONALE_PROMPT = """You are explaining one possible schedule to the user.
@@ -32,6 +41,12 @@ The user wanted to achieve: {goal}
 Context: {context}
 
 Strategy: {strategy_name} — {strategy_description}
+
+User working window: {work_start} to {work_end}
+User energy profile (for energy-aware interpretation):
+- Morning: {energy_morning}
+- Afternoon: {energy_afternoon}
+- Evening: {energy_evening}
 
 The goal was broken into these subtasks (with estimated durations):
 {subtasks_summary}
@@ -45,6 +60,7 @@ Write 2–3 sentences explaining:
 1. What tradeoff this strategy makes.
 2. Why this schedule looks the way it does given the user's calendar.
 3. If there are violations, briefly note what they are.
+4. Confirm the schedule still respects dependency/learning flow constraints.
 
 Be concise, specific, and helpful.
 """
@@ -128,6 +144,11 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
             context=state.get("context", ""),
             strategy_name=strategy_name,
             strategy_description=STRATEGY_DESCRIPTIONS[strategy_name],
+            work_start=state.get("work_start", "unknown"),
+            work_end=state.get("work_end", "unknown"),
+            energy_morning=state.get("energy_levels", {}).get("morning", "unspecified"),
+            energy_afternoon=state.get("energy_levels", {}).get("afternoon", "unspecified"),
+            energy_evening=state.get("energy_levels", {}).get("evening", "unspecified"),
             subtasks_summary=subtasks_summary,
             schedule_summary=schedule_summary,
             violation_count=violation_count,
