@@ -78,7 +78,28 @@ def _format_named_items(items: list[dict[str, Any]], limit: int = 8) -> str:
     if not items:
         return "none"
 
-    names = [str(item.get("name", "Untitled")) for item in items[:limit]]
+    names = [_format_named_item(item) for item in items[:limit]]
     if len(items) > limit:
         names.append(f"... +{len(items) - limit} more")
     return "; ".join(names)
+
+
+def _format_named_item(item: dict[str, Any]) -> str:
+    name = str(item.get("name", "Untitled"))
+
+    tag_parts = []
+    if item.get("group") is not None:
+        tag_parts.append(f"group={item['group']}")
+    if item.get("seq") is not None:
+        tag_parts.append(f"seq={item['seq']}")
+    if item.get("shuffle") is not None:
+        tag_parts.append(f"shuffle={item['shuffle']}")
+
+    if item.get("period") is not None:
+        tag_parts.append(f"period={item['period']}")
+    if item.get("period_energy_level") is not None:
+        tag_parts.append(f"energy={item['period_energy_level']}")
+
+    if not tag_parts:
+        return name
+    return f"{name} ({', '.join(tag_parts)})"

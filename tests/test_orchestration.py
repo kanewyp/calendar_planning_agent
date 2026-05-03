@@ -21,6 +21,10 @@ import pytest
 
 from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.decompose_goal import decompose_goal_node
+from src.orchestration.nodes.schedule_candidates import (
+    energy_aware_node,
+    min_fragmentation_node,
+)
 from src.orchestration.nodes.validate_candidates import validate_candidates_node
 from src.orchestration.graph import resume_graph
 from src.orchestration.heuristics.deadline_first import schedule_deadline_first
@@ -58,6 +62,38 @@ class TestDecomposeGoalNode:
         assert result["subtasks"] == llm_output
         assert result["debug_trace"][0]["node"] == "decompose_goal"
         assert result["debug_trace"][0]["details"]["count"] == 2
+
+    def test_structural_tags_are_included_in_debug_trace(self):
+        state = {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "context": "I know JavaScript already.",
+            "max_session_minutes": 90,
+        }
+        llm_output = [
+            {
+                "name": "Read the intro docs",
+                "description": (
+                    "[group:foundations] [seq:1] [shuffle:no] "
+                    "Work through the official React introduction."
+                ),
+                "duration_minutes": 45,
+            },
+        ]
+
+        with patch(
+            "src.orchestration.nodes.decompose_goal.call_llm_json",
+            return_value=llm_output,
+        ):
+            result = decompose_goal_node(state)
+
+        details = result["debug_trace"][0]["details"]
+        item = details["items"][0]
+        assert details["structural_tagged_count"] == 1
+        assert item["has_structural_tags"] is True
+        assert item["group"] == "foundations"
+        assert item["seq"] == 1
+        assert item["shuffle"] is False
 
     def test_empty_llm_output_raises(self):
         state = {
@@ -254,6 +290,85 @@ class TestEnergyAwareHeuristic:
                 assert start_time >= morning_boundary, (
                     f"Light task '{event['name']}' placed in morning at {start_time}"
                 )
+
+
+class TestScheduleCandidateNodes:
+    def test_energy_aware_trace_includes_energy_and_order_metadata(self):
+        state = {
+            "subtasks": [
+                {
+                    "name": "Deep work",
+                    "description": (
+                        "[group:project] [seq:1] [shuffle:no] "
+                        "Implement the core feature."
+                    ),
+                    "duration_minutes": 90,
+                }
+            ],
+            "free_slots": [
+                {
+                    "start": "2026-04-06T09:00:00+00:00",
+                    "end": "2026-04-06T10:30:00+00:00",
+                },
+            ],
+            "work_start": "09:00",
+            "energy_levels": {
+                "morning": "low",
+                "afternoon": "medium",
+                "evening": "high",
+            },
+        }
+
+        result = energy_aware_node(state)
+
+        trace = result["debug_trace"][0]
+        assert trace["node"] == "schedule_energy_aware"
+        assert trace["summary"]["energy_levels"] == state["energy_levels"]
+        assert trace["summary"]["structural_mode"] is True
+        assert trace["summary"]["subtask_order_before"] == ["Deep work"]
+        assert trace["summary"]["scheduled_order"] == ["Deep work"]
+        assert trace["summary"]["chronological_order"] == ["Deep work"]
+        assert trace["summary"]["order_inversion_count"] == 0
+        assert trace["details"]["events"][0]["period"] == "morning"
+        assert trace["details"]["events"][0]["period_energy_level"] == "low"
+        assert trace["details"]["order_inversions"] == []
+
+    def test_schedule_trace_flags_chronological_order_inversions(self):
+        state = {
+            "subtasks": [
+                {"name": "First dependency", "description": "Do first.", "duration_minutes": 30},
+                {"name": "Long follow-up", "description": "Do second.", "duration_minutes": 90},
+            ],
+            "free_slots": [
+                {
+                    "start": "2026-04-06T09:00:00+00:00",
+                    "end": "2026-04-06T11:00:00+00:00",
+                },
+            ],
+        }
+
+        result = min_fragmentation_node(state)
+
+        trace = result["debug_trace"][0]
+        assert trace["summary"]["subtask_order_before"] == [
+            "First dependency",
+            "Long follow-up",
+        ]
+        assert trace["summary"]["chronological_order"] == [
+            "Long follow-up",
+            "First dependency",
+        ]
+        assert trace["summary"]["order_inversion_count"] == 1
+        assert trace["details"]["order_inversions"] == [
+            {
+                "scheduled_before": "Long follow-up",
+                "scheduled_before_start": "2026-04-06T09:00:00+00:00",
+                "scheduled_before_original_index": 1,
+                "should_have_preceded": "First dependency",
+                "should_have_preceded_start": "2026-04-06T10:30:00+00:00",
+                "should_have_preceded_original_index": 0,
+            }
+        ]
 
 
 class TestValidateCandidates:
