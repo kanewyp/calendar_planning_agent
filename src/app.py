@@ -30,7 +30,10 @@ if str(PROJECT_ROOT) not in sys.path:
 import streamlit as st
 
 from src.frontend.intake_form import render_intake_form
-from src.frontend.schedule_display import render_all_candidates
+from src.frontend.schedule_display import (
+    ACTIVE_STRATEGY_KEY,
+    render_calendar_view,
+)
 from src.frontend.approval_controls import render_strategy_buttons
 from src.frontend.debug_panel import render_debug_trace
 from src.orchestration.graph import build_graph, run_graph_until_approval, resume_graph
@@ -160,10 +163,11 @@ def main() -> None:
         st.rerun()
         return
 
-      render_all_candidates(graph_state)
+      active_strategy = render_calendar_view(graph_state)
       render_debug_trace(graph_state)
       action, strategy_name = render_strategy_buttons(
-        graph_state.get("candidates_identical", False)
+        graph_state.get("candidates_identical", False),
+        active_strategy=active_strategy,
       )
 
       if action == "approve" and strategy_name is not None:
