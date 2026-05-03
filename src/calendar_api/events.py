@@ -22,6 +22,37 @@ from src.calendar_api.auth import build_calendar_service
 AGENT_TAG = "[CALENDAR_AGENT]"
 
 
+def _parse_event_boundary(
+    event_boundary: dict[str, str],
+    *,
+    is_end_boundary: bool,
+) -> datetime.datetime | None:
+    """Convert Google Calendar boundary payload to a timezone-aware datetime.
+
+    Google returns either:
+    - {"dateTime": "..."} for timed events
+    - {"date": "YYYY-MM-DD"} for all-day events
+    """
+    raw_datetime = event_boundary.get("dateTime")
+    if raw_datetime:
+        parsed = datetime.datetime.fromisoformat(raw_datetime)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=datetime.timezone.utc)
+        return parsed
+
+    raw_date = event_boundary.get("date")
+    if not raw_date:
+        return None
+
+    day = datetime.date.fromisoformat(raw_date)
+    if is_end_boundary:
+        parsed = datetime.datetime.combine(day, datetime.time.min)
+    else:
+        parsed = datetime.datetime.combine(day, datetime.time.min)
+
+    return parsed.replace(tzinfo=datetime.timezone.utc)
+
+
 def fetch_busy_blocks(
     time_min: datetime.datetime,
     time_max: datetime.datetime,
@@ -53,25 +84,39 @@ def fetch_busy_blocks(
     4. Return the list sorted by start time.
     """
     service = build_calendar_service()
-    response = (
-        service.events()
-        .list(
-            calendarId=calendar_id,
-            timeMin=time_min.isoformat(),
-            timeMax=time_max.isoformat(),
-            singleEvents=True,
-            orderBy="startTime",
-        )
-        .execute()
-    )
-
     busy_blocks: list[dict[str, str]] = []
-    for item in response.get("items", []):
-        start = item.get("start", {}).get("dateTime")
-        end = item.get("end", {}).get("dateTime")
-        if not start or not end:
-            continue
-        busy_blocks.append({"start": start, "end": end})
+    page_token: str | None = None
+
+    while True:
+        response = (
+            service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=time_min.isoformat(),
+                timeMax=time_max.isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                pageToken=page_token,
+            )
+            .execute()
+        )
+
+        for item in response.get("items", []):
+            start_data = item.get("start", {})
+            end_data = item.get("end", {})
+
+            start_dt = _parse_event_boundary(start_data, is_end_boundary=False)
+            end_dt = _parse_event_boundary(end_data, is_end_boundary=True)
+            if not start_dt or not end_dt or start_dt >= end_dt:
+                continue
+
+            busy_blocks.append(
+                {"start": start_dt.isoformat(), "end": end_dt.isoformat()}
+            )
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
 
     busy_blocks.sort(key=lambda b: b["start"])
     return busy_blocks
@@ -117,8 +162,9 @@ def create_event(
     event_body = {
         "summary": summary,
         "description": f"{AGENT_TAG} {description}",
-        "start": {"dateTime": start.isoformat(), "timeZone": str(start.tzinfo)},
-        "end": {"dateTime": end.isoformat(), "timeZone": str(end.tzinfo)},
+        # dateTime includes offset; keeping payload minimal avoids invalid tz labels.
+        "start": {"dateTime": start.isoformat()},
+        "end": {"dateTime": end.isoformat()},
     }
     return service.events().insert(calendarId=calendar_id, body=event_body).execute()
 
@@ -147,9 +193,10 @@ def create_events_batch(
     for event in events:
         start_dt = datetime.datetime.fromisoformat(event["start"])
         end_dt = datetime.datetime.fromisoformat(event["end"])
+        description = str(event.get("description", ""))
         response = create_event(
             summary=event["name"],
-            description=event["description"],
+            description=description,
             start=start_dt,
             end=end_dt,
             calendar_id=calendar_id,

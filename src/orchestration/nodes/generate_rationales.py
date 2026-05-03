@@ -66,6 +66,33 @@ Be concise, specific, and helpful.
 """
 
 
+def _fallback_rationale(
+    strategy_name: str,
+    strategy_description: str,
+    violation_count: int,
+    violation_summary: str,
+    candidate_count: int,
+) -> str:
+    """Return a deterministic rationale when LLM generation fails.
+
+    This keeps planning functional under transient provider/API issues.
+    """
+    violation_text = (
+        "No hard-constraint violations were detected."
+        if violation_count == 0
+        else (
+            f"The validator found {violation_count} issue(s): "
+            f"{violation_summary}."
+        )
+    )
+    return (
+        f"This plan uses the {strategy_name} strategy: {strategy_description} "
+        f"It schedules {candidate_count} event(s) based on your available calendar "
+        f"time blocks and preserves the dependency-safe learning flow. "
+        f"{violation_text}"
+    )
+
+
 def generate_rationales_node(state: AgentState) -> dict[str, Any]:
     """LangGraph node: generate one rationale per strategy via LLM.
 
@@ -115,6 +142,7 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
     }
 
     rationales: dict[str, str] = {}
+    rationale_sources: dict[str, str] = {}
     for strategy_name, state_key in strategy_state_keys.items():
         candidate = state[state_key]
 
@@ -160,19 +188,30 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
                 prompt,
                 purpose="rationale",
             ).strip()
+            rationale_sources[strategy_name] = "llm"
         except Exception as exc:
-            raise RuntimeError(
-                f"Rationale generation failed for strategy '{strategy_name}'"
-            ) from exc
+            _ = exc
+            rationales[strategy_name] = _fallback_rationale(
+                strategy_name=strategy_name,
+                strategy_description=STRATEGY_DESCRIPTIONS[strategy_name],
+                violation_count=violation_count,
+                violation_summary=violation_summary,
+                candidate_count=len(candidate),
+            )
+            rationale_sources[strategy_name] = "fallback"
 
     trace = make_trace_event(
         "generate_rationales",
         summary={
             **get_llm_metadata("rationale"),
             "rationale_count": len(rationales),
+            "fallback_count": sum(
+                1 for src in rationale_sources.values() if src == "fallback"
+            ),
         },
         details={
             strategy: {
+                "source": rationale_sources[strategy],
                 "character_count": len(rationale),
                 "word_count": len(rationale.split()),
             }

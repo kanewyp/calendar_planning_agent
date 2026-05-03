@@ -17,6 +17,8 @@ from src.llm_client.client import (
     GEMINI_OPENAI_BASE_URL,
     MAX_RETRIES,
     VERTEX_OPENAI_BASE_URL_TEMPLATE,
+    _clean_llm_json,
+    _parse_json_with_recovery,
     call_llm_json,
     call_llm_text,
 )
@@ -49,13 +51,76 @@ class TestCallLlmJson:
                 call_llm_json("prompt")
         assert m.call_count == MAX_RETRIES + 1
 
-    def test_retry_on_api_error(self):
-        with patch(
-            _PATCH_TARGET,
-            side_effect=[_FakeAPIError(), '{"ok": true}'],
-        ) as m:
-            assert call_llm_json("prompt") == {"ok": True}
-        assert m.call_count == 2
+    def test_retry_prompt_contains_error_and_snippet(self):
+        """On JSON failure the retry prompt should include the parse error and
+        a snippet of the broken response so the model can self-correct."""
+        calls: list[str] = []
+
+        def _fake_call_llm(prompt, **kwargs):
+            calls.append(prompt)
+            if len(calls) == 1:
+                return "definitely not json {"
+            return '[{"name": "fixed"}]'
+
+        with patch(_PATCH_TARGET, side_effect=_fake_call_llm):
+            result = call_llm_json("original prompt")
+
+        assert result == [{"name": "fixed"}]
+        assert len(calls) == 2
+        # Retry prompt should reference original prompt, error, and snippet
+        assert "original prompt" in calls[1]
+        assert "Parse error" in calls[1]
+        assert "definitely not json" in calls[1]
+
+
+class TestJsonRecovery:
+    """Tests for the JSON cleaning and recovery helpers."""
+
+    def test_strips_markdown_code_fences(self):
+        raw = "```json\n[{\"a\": 1}]\n```"
+        assert _parse_json_with_recovery(raw) == [{"a": 1}]
+
+    def test_removes_trailing_commas_in_object(self):
+        raw = '{"a": 1, "b": 2,}'
+        assert _parse_json_with_recovery(raw) == {"a": 1, "b": 2}
+
+    def test_removes_trailing_commas_in_array(self):
+        raw = '[1, 2, 3,]'
+        assert _parse_json_with_recovery(raw) == [1, 2, 3]
+
+    def test_normalises_smart_quotes(self):
+        raw = '[\u201cvalue\u201d]'
+        assert _parse_json_with_recovery(raw) == ["value"]
+
+    def test_strips_leading_prose(self):
+        raw = 'Here is your JSON:\n[{"name": "task"}]'
+        assert _parse_json_with_recovery(raw) == [{"name": "task"}]
+
+    def test_python_literals_converted(self):
+        raw = '{"flag": True, "other": None}'
+        assert _parse_json_with_recovery(raw) == {"flag": True, "other": None}
+
+    def test_valid_json_returned_unchanged(self):
+        raw = '[{"name": "task", "duration_minutes": 60}]'
+        result = _parse_json_with_recovery(raw)
+        assert result[0]["name"] == "task"
+        assert result[0]["duration_minutes"] == 60
+
+    def test_gemini_style_response_with_trailing_comma_and_fence(self):
+        """Simulate the exact format Gemini sometimes returns."""
+        raw = (
+            "```json\n"
+            "[\n"
+            '  {"name": "Learn basics", "description": "Read docs.", "duration_minutes": 60,},\n'
+            '  {"name": "Build project", "description": "Write code.", "duration_minutes": 90}\n'
+            "]\n"
+            "```"
+        )
+        result = _parse_json_with_recovery(raw)
+        assert len(result) == 2
+        assert result[0]["name"] == "Learn basics"
+
+
 
 
 class TestCallLlmText:

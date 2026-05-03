@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from urllib import error, request
 
@@ -30,25 +31,66 @@ VERTEX_OPENAI_BASE_URL_TEMPLATE = (
 MAX_RETRIES = 2
 
 
-def _parse_json_with_recovery(text: str) -> Any:
-    """Parse JSON from model output, tolerating trailing/leading extra text.
+def _clean_llm_json(text: str) -> str:
+    """Apply heuristic fixes for common LLM JSON formatting mistakes.
 
-    Many providers occasionally prepend/append short non-JSON snippets even when
-    instructed not to. This function first tries strict parsing; if that fails,
-    it extracts the first decodable JSON value from the first '{' or '[' onward.
+    Handles in order:
+    1. Markdown code fences  (```json ... ```)
+    2. Smart / curly quotes  (\u201c\u201d\u2018\u2019)
+    3. Trailing commas before ] or }   ([1, 2,])
+    4. Python-style True/False/None literals
+    5. Extracts the first JSON array or object if surrounded by prose
     """
+    # 1. Strip markdown code fences
+    text = re.sub(r"```[a-zA-Z]*\n?", "", text).strip("`").strip()
+
+    # 2. Normalise smart / curly quotes to ASCII
+    text = (
+        text
+        .replace("\u201c", '"').replace("\u201d", '"')
+        .replace("\u2018", "'").replace("\u2019", "'")
+    )
+
+    # 3. Remove trailing commas  ,}  or  ,]
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+
+    # 4. Python literals → JSON literals
+    text = re.sub(r"\bTrue\b",  "true",  text)
+    text = re.sub(r"\bFalse\b", "false", text)
+    text = re.sub(r"\bNone\b",  "null",  text)
+
+    return text
+
+
+def _parse_json_with_recovery(text: str) -> Any:
+    """Parse JSON from model output with multiple fallback strategies.
+
+    1. Strict json.loads on the raw text.
+    2. Clean common formatting errors then retry json.loads.
+    3. raw_decode from the first '[' or '{' in the cleaned text.
+    """
+    # Strategy 1 — strict parse
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
 
+    cleaned = _clean_llm_json(text)
+
+    # Strategy 2 — cleaned parse
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 3 — extract first JSON value via raw_decode
     decoder = json.JSONDecoder()
-    start_candidates = [idx for idx in (text.find("["), text.find("{")) if idx != -1]
+    start_candidates = [idx for idx in (cleaned.find("["), cleaned.find("{")) if idx != -1]
     if not start_candidates:
         raise json.JSONDecodeError("No JSON object or array found", text, 0)
 
     start = min(start_candidates)
-    parsed, _end = decoder.raw_decode(text[start:])
+    parsed, _end = decoder.raw_decode(cleaned[start:])
     return parsed
 
 
@@ -294,19 +336,27 @@ def call_llm_json(
     """Call an LLM for a JSON response and parse it."""
     current_prompt = prompt
     last_error: Exception | None = None
+    last_response: str = ""
     for attempt in range(MAX_RETRIES + 1):
         try:
-            response_text = _call_llm(
+            last_response = _call_llm(
                 current_prompt,
                 purpose=purpose,
                 temperature=temperature,
             ).strip()
-            return _parse_json_with_recovery(response_text)
+            return _parse_json_with_recovery(last_response)
         except json.JSONDecodeError as exc:
             last_error = exc
+            # Show the model a snippet of its broken output and the parse error
+            snippet = last_response[:400].replace("\n", "\\n")
             current_prompt = (
                 f"{prompt}\n\n"
-                "Your previous response was not valid JSON. Return ONLY JSON."
+                "IMPORTANT: Your previous response could not be parsed as JSON.\n"
+                f"Parse error: {exc}\n"
+                f"Your response started with: {snippet!r}\n\n"
+                "Return ONLY a valid JSON array. No markdown, no code fences, "
+                "no explanatory text before or after the JSON. "
+                "Do not use trailing commas. Use double quotes for all strings."
             )
         except anthropic.APIError as exc:
             last_error = exc

@@ -58,7 +58,10 @@ def write_events_node(state: AgentState) -> dict[str, Any]:
     elif mode == "live":
         from src.calendar_api.events import create_events_batch
 
-        responses = create_events_batch(final_schedule)
+        responses = create_events_batch(
+            final_schedule,
+            calendar_id=settings.GOOGLE_CALENDAR_ID,
+        )
     else:
         raise ValueError(
             f"write_events_node: unknown CALENDAR_MODE {mode!r}; "
@@ -76,7 +79,8 @@ def write_events_node(state: AgentState) -> dict[str, Any]:
             "event_names": [
                 event.get("name", "Untitled event")
                 for event in final_schedule
-            ]
+            ],
+            "calendar_id": settings.GOOGLE_CALENDAR_ID,
         },
     )
 

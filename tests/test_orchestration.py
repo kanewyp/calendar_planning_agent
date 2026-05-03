@@ -21,7 +21,10 @@ import pytest
 
 from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.decompose_goal import decompose_goal_node
+from src.orchestration.nodes.fetch_events import fetch_events_node
+from src.orchestration.nodes.generate_rationales import generate_rationales_node
 from src.orchestration.nodes.validate_candidates import validate_candidates_node
+from src.orchestration.nodes.write_events import write_events_node
 from src.orchestration.graph import resume_graph
 from src.orchestration.heuristics.deadline_first import schedule_deadline_first
 from src.orchestration.heuristics.minimize_fragmentation import schedule_min_fragmentation
@@ -500,3 +503,168 @@ class TestBuildProposal:
 
         assert result["candidates_identical"] is False
         assert result["debug_trace"][0]["node"] == "build_proposal"
+
+
+class TestGenerateRationales:
+    def _base_state(self) -> dict[str, Any]:
+        candidate = [
+            {
+                "name": "Read docs",
+                "description": "Study core concepts",
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            }
+        ]
+        return {
+            "goal": "Learn React",
+            "context": "Already know JS",
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "energy_levels": {
+                "morning": "high",
+                "afternoon": "medium",
+                "evening": "low",
+            },
+            "subtasks": [
+                {
+                    "name": "Read docs",
+                    "description": "Study core concepts",
+                    "duration_minutes": 60,
+                }
+            ],
+            "candidate_deadline_first": list(candidate),
+            "candidate_min_fragmentation": list(candidate),
+            "candidate_energy_aware": list(candidate),
+            "candidate_validations": {
+                "deadline_first": {"passed": True, "violations": []},
+                "min_fragmentation": {"passed": True, "violations": []},
+                "energy_aware": {"passed": True, "violations": []},
+            },
+        }
+
+    def test_single_strategy_llm_failure_uses_fallback(self):
+        state = self._base_state()
+        responses = {
+            "deadline_first": RuntimeError("provider transient failure"),
+            "min_fragmentation": "Fragmentation rationale",
+            "energy_aware": "Energy rationale",
+        }
+
+        def _fake_call(prompt: str, purpose: str = "rationale") -> str:
+            _ = purpose
+            for strategy_name, response in responses.items():
+                if f"Strategy: {strategy_name}" in prompt:
+                    if isinstance(response, Exception):
+                        raise response
+                    return response
+            raise AssertionError("Unexpected prompt strategy")
+
+        with patch(
+            "src.orchestration.nodes.generate_rationales.call_llm_text",
+            side_effect=_fake_call,
+        ):
+            result = generate_rationales_node(state)
+
+        rationales = result["candidate_rationales"]
+        assert "deadline_first" in rationales
+        assert "schedules 1 event(s)" in rationales["deadline_first"]
+        assert rationales["min_fragmentation"] == "Fragmentation rationale"
+        assert rationales["energy_aware"] == "Energy rationale"
+
+        trace = result["debug_trace"][0]
+        assert trace["node"] == "generate_rationales"
+        assert trace["summary"]["fallback_count"] == 1
+        assert trace["details"]["deadline_first"]["source"] == "fallback"
+        assert trace["details"]["min_fragmentation"]["source"] == "llm"
+
+    def test_all_strategy_llm_failures_still_return_rationales(self):
+        state = self._base_state()
+
+        with patch(
+            "src.orchestration.nodes.generate_rationales.call_llm_text",
+            side_effect=RuntimeError("provider down"),
+        ):
+            result = generate_rationales_node(state)
+
+        rationales = result["candidate_rationales"]
+        assert set(rationales.keys()) == {
+            "deadline_first",
+            "min_fragmentation",
+            "energy_aware",
+        }
+        assert all("preserves the dependency-safe learning flow" in text for text in rationales.values())
+
+        trace = result["debug_trace"][0]
+        assert trace["summary"]["fallback_count"] == 3
+        assert all(
+            info["source"] == "fallback"
+            for info in trace["details"].values()
+        )
+
+
+class TestLiveCalendarNodeIntegration:
+    def test_fetch_events_live_uses_configured_calendar_id(self, monkeypatch):
+        state = {
+            "deadline": "2099-01-01",
+            "work_start": "09:00",
+            "work_end": "18:00",
+        }
+        observed: dict[str, Any] = {}
+
+        monkeypatch.setattr("src.orchestration.nodes.fetch_events.settings.CALENDAR_MODE", "live")
+        monkeypatch.setattr(
+            "src.orchestration.nodes.fetch_events.settings.GOOGLE_CALENDAR_ID",
+            "learning-calendar@example.com",
+        )
+
+        def _fake_fetch_busy_blocks(time_min, time_max, calendar_id):
+            observed["calendar_id"] = calendar_id
+            return []
+
+        monkeypatch.setattr(
+            "src.orchestration.nodes.fetch_events.compute_free_slots",
+            lambda **kwargs: [],
+        )
+        monkeypatch.setattr(
+            "src.calendar_api.events.fetch_busy_blocks",
+            _fake_fetch_busy_blocks,
+        )
+
+        result = fetch_events_node(state)
+
+        assert observed["calendar_id"] == "learning-calendar@example.com"
+        assert result["busy_blocks"] == []
+        assert result["free_slots"] == []
+
+    def test_write_events_live_uses_configured_calendar_id(self, monkeypatch):
+        state = {
+            "final_schedule": [
+                {
+                    "name": "Learn SQL",
+                    "description": "Read indexing chapter",
+                    "start": "2026-04-06T10:00:00+00:00",
+                    "end": "2026-04-06T11:00:00+00:00",
+                }
+            ]
+        }
+        observed: dict[str, Any] = {}
+
+        monkeypatch.setattr("src.orchestration.nodes.write_events.settings.CALENDAR_MODE", "live")
+        monkeypatch.setattr(
+            "src.orchestration.nodes.write_events.settings.GOOGLE_CALENDAR_ID",
+            "learning-calendar@example.com",
+        )
+
+        def _fake_create_events_batch(events, calendar_id):
+            observed["calendar_id"] = calendar_id
+            return [{"id": "evt-123"}]
+
+        monkeypatch.setattr(
+            "src.calendar_api.events.create_events_batch",
+            _fake_create_events_batch,
+        )
+
+        result = write_events_node(state)
+
+        assert observed["calendar_id"] == "learning-calendar@example.com"
+        assert result["write_results"] == [{"id": "evt-123"}]
