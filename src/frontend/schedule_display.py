@@ -1,13 +1,16 @@
 # =============================================================================
-# src/frontend/schedule_display.py — Multi-strategy schedule display
+# src/frontend/schedule_display.py — Google-Calendar-style review view
 # =============================================================================
-# Renders all three candidate schedules side-by-side (or collapsed if
-# near-identical) with per-strategy rationales and violation badges.
+# Renders the agent's three candidate schedules as a Google-Calendar-like view
+# by embedding FullCalendar 6 inside an iframe via Streamlit's `components.html`.
+# Existing `busy_blocks` are drawn alongside the heuristic's proposed events so
+# the user can see overlap with their real calendar.
 #
-# STEPS TO COMPLETE:
-# 1. Implement render_all_candidates for the three-column layout.
-# 2. Implement render_single_schedule for a single schedule table.
-# 3. Implement render_collapsed_view for the near-identical case.
+# Public surface used by app.py and tests:
+#   - render_calendar_view(state)        — main entry point for review phase
+#   - render_violation_badge(validation) — kept for shared badge rendering
+#   - render_collapsed_view(state)       — used when all candidates match
+#   - _group_events_by_day(schedule)     — helper retained for unit tests
 # =============================================================================
 
 from __future__ import annotations
@@ -17,19 +20,34 @@ from typing import Any
 
 import streamlit as st
 
+from src.frontend.calendar_events import (
+    STRATEGY_COLORS,
+    STRATEGY_STATE_KEYS,
+    build_calendar_events,
+)
+from src.frontend.calendar_html import build_calendar_html
 from src.orchestration.state import AgentState, ValidationResult
 
 
-STRATEGY_LABELS = {
+STRATEGY_LABELS: dict[str, tuple[str, str]] = {
     "deadline_first": ("Finish Earliest", "Maximises buffer before deadline"),
     "min_fragmentation": ("Keep Time Contiguous", "Fills largest slots first"),
     "energy_aware": ("Energy-Aware", "Heavy work mornings, light afternoons"),
 }
 
-STRATEGY_STATE_KEYS = {
-    "deadline_first": "candidate_deadline_first",
-    "min_fragmentation": "candidate_min_fragmentation",
-    "energy_aware": "candidate_energy_aware",
+ACTIVE_STRATEGY_KEY = "active_strategy_view"
+ACTIVE_VIEW_KEY = "active_calendar_view"
+
+_VIEW_OPTIONS: dict[str, str] = {
+    "Month": "dayGridMonth",
+    "Week": "timeGridWeek",
+    "Day": "timeGridDay",
+}
+
+_CALENDAR_HEIGHT_BY_VIEW: dict[str, int] = {
+    "dayGridMonth": 760,
+    "timeGridWeek": 820,
+    "timeGridDay": 820,
 }
 
 
@@ -59,117 +77,134 @@ def _group_events_by_day(
     return dict(sorted(grouped.items(), key=lambda item: item[0]))
 
 
-def render_all_candidates(state: AgentState) -> None:
-    """Display all three strategy options for the user to compare.
-
-    STEPS:
-    1. Check state["candidates_identical"].
-       a. If True → call render_collapsed_view(state) and return.
-    2. Create three Streamlit columns: st.columns(3).
-    3. For each (strategy_name, column) pair:
-       a. Read the candidate schedule from state[STRATEGY_STATE_KEYS[name]].
-       b. Read the validation from state["candidate_validations"][name].
-       c. Read the rationale from state["candidate_rationales"][name].
-       d. In the column:
-          - Render the strategy label and one-line pitch from STRATEGY_LABELS.
-          - Render a violation badge: green "No conflicts" or red "N conflicts".
-          - Call render_single_schedule(candidate) for the event table.
-          - Render the rationale with st.info().
-    """
+def _resolve_active_strategy(state: AgentState) -> str:
     if state.get("candidates_identical", False):
-        render_collapsed_view(state)
-        return
+        st.session_state[ACTIVE_STRATEGY_KEY] = "deadline_first"
+        return "deadline_first"
 
-    validations = state.get("candidate_validations", {})
-    rationales = state.get("candidate_rationales", {})
-    columns = st.columns(3)
+    current = st.session_state.get(ACTIVE_STRATEGY_KEY, "deadline_first")
+    if current not in STRATEGY_LABELS:
+        current = "deadline_first"
+        st.session_state[ACTIVE_STRATEGY_KEY] = current
+    return current
 
-    for strategy_name, column in zip(STRATEGY_LABELS, columns):
-        title, subtitle = STRATEGY_LABELS[strategy_name]
-        candidate_key = STRATEGY_STATE_KEYS[strategy_name]
-        candidate = state.get(candidate_key, [])
-        validation = validations.get(
-            strategy_name,
-            ValidationResult(passed=True, violations=[]),
+
+def _render_header(state: AgentState) -> tuple[str, str]:
+    """Render the heuristic + view picker row and return (strategy, view)."""
+    strategy_keys = list(STRATEGY_LABELS.keys())
+    strategy_labels = [STRATEGY_LABELS[name][0] for name in strategy_keys]
+
+    title_col, view_col, picker_col = st.columns([3, 2, 3])
+
+    with title_col:
+        st.subheader("Proposed schedule")
+        st.caption(
+            "Gray blocks are existing events. Colored blocks are AI proposals. "
+            "Click any event for details."
         )
-        rationale = rationales.get(strategy_name, "No rationale available yet.")
 
-        with column:
-            st.subheader(title)
-            st.caption(subtitle)
-            render_violation_badge(validation)
-            render_single_schedule(candidate)
-            st.info(rationale)
+    with view_col:
+        view_label = st.radio(
+            "View",
+            list(_VIEW_OPTIONS.keys()),
+            index=list(_VIEW_OPTIONS.keys()).index(
+                st.session_state.get(ACTIVE_VIEW_KEY, "Month")
+            ),
+            horizontal=True,
+            label_visibility="collapsed",
+            key="calendar_view_radio",
+        )
+    st.session_state[ACTIVE_VIEW_KEY] = view_label
+    initial_view = _VIEW_OPTIONS[view_label]
 
+    with picker_col:
+        if state.get("candidates_identical", False):
+            st.markdown("**Heuristic**: all three matched")
+            active_strategy = "deadline_first"
+        else:
+            current = _resolve_active_strategy(state)
+            selected_label = st.radio(
+                "Heuristic",
+                strategy_labels,
+                index=strategy_keys.index(current),
+                horizontal=True,
+                label_visibility="collapsed",
+                key="strategy_radio",
+            )
+            active_strategy = strategy_keys[strategy_labels.index(selected_label)]
+            st.session_state[ACTIVE_STRATEGY_KEY] = active_strategy
 
-def render_single_schedule(schedule: list[dict[str, Any]]) -> None:
-    """Display one candidate schedule as a table/list.
-
-    Args:
-        schedule: List of ProposedEvent dicts.
-
-    STEPS:
-    1. Format start/end into human-readable strings
-       e.g. "Mon Apr 07 · 09:00–10:30".
-    2. Group events by date for readability.
-    3. Render with st.dataframe() or iterate with st.write() for cards.
-    """
-    if not schedule:
-        st.caption("No events scheduled.")
-        return
-
-    st.caption(f"{len(schedule)} event(s)")
-    grouped_by_day = _group_events_by_day(schedule)
-    for day, events in grouped_by_day.items():
-        st.markdown(f"**{day.strftime('%a, %b %d')}**")
-        for start_dt, end_dt, event in events:
-            time_range = f"{start_dt.strftime('%H:%M')}–{end_dt.strftime('%H:%M')}"
-            description = event.get("description", "")
-            title = event.get("name", "Untitled task")
-
-            if description:
-                st.write(f"- {time_range}  {title}")
-                st.caption(description)
-            else:
-                st.write(f"- {time_range}  {title}")
-
-        st.divider()
+    return active_strategy, initial_view
 
 
-def render_collapsed_view(state: AgentState) -> None:
-    """Display a single schedule when all strategies produced the same result.
-
-    STEPS:
-    1. Show st.info("All three strategies produced the same schedule.").
-    2. Pick any candidate (e.g. deadline_first) and render it with
-       render_single_schedule().
-    3. Show the rationale from any strategy (they'll be similar).
-    4. Show violations if any.
-    """
-    st.info("All three strategies produced the same schedule.")
-
-    candidate = state.get("candidate_deadline_first", [])
-    render_single_schedule(candidate)
+def _render_strategy_summary(state: AgentState, strategy_name: str) -> None:
+    title, subtitle = STRATEGY_LABELS[strategy_name]
+    badge_col, info_col = st.columns([1, 4])
 
     validation = state.get("candidate_validations", {}).get(
-        "deadline_first",
+        strategy_name,
         ValidationResult(passed=True, violations=[]),
     )
-    render_violation_badge(validation)
+    rationale = state.get("candidate_rationales", {}).get(
+        strategy_name,
+        "No rationale available yet.",
+    )
 
-    rationale = state.get("candidate_rationales", {}).get("deadline_first")
-    if rationale:
+    with badge_col:
+        render_violation_badge(validation)
+
+    with info_col:
+        color = STRATEGY_COLORS[strategy_name]
+        st.markdown(
+            f"<div style='display:flex;align-items:center;gap:8px;"
+            f"font-weight:500;font-size:15px;'>"
+            f"<span style='display:inline-block;width:12px;height:12px;"
+            f"border-radius:50%;background:{color};'></span>"
+            f"{title} — <span style='color:#5f6368;font-weight:400;'>{subtitle}</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
         st.info(rationale)
 
 
-def render_violation_badge(validation: ValidationResult) -> None:
-    """Show a compact violation indicator.
+def render_calendar_view(state: AgentState) -> str:
+    """Render the calendar review screen and return the active strategy.
 
-    STEPS:
-    1. If validation["passed"] → st.success("No conflicts").
-    2. Else → st.error(f"{len(validation['violations'])} conflict(s)").
-    3. Optionally expand to show violation details in an st.expander.
+    The strategy is also stored in `st.session_state[ACTIVE_STRATEGY_KEY]`
+    so app.py / approval_controls can pick it up when the user approves.
     """
+    if state.get("candidates_identical", False):
+        st.info("All three strategies produced the same schedule.")
+
+    active_strategy, initial_view = _render_header(state)
+    _render_strategy_summary(state, active_strategy)
+
+    events = build_calendar_events(state, active_strategy)
+    work_start = str(state.get("work_start") or "08:00")
+    work_end = str(state.get("work_end") or "20:00")
+    fallback_iso = state.get("deadline") or datetime.date.today().isoformat()
+
+    html_doc = build_calendar_html(
+        events,
+        initial_view=initial_view,
+        work_start=work_start,
+        work_end=work_end,
+        fallback_date_iso=str(fallback_iso),
+    )
+
+    st.iframe(
+        html_doc,
+        height=_CALENDAR_HEIGHT_BY_VIEW.get(initial_view, 800),
+    )
+
+    if not events:
+        st.caption("No events to display for this heuristic yet.")
+
+    return active_strategy
+
+
+def render_violation_badge(validation: ValidationResult) -> None:
+    """Show a compact violation indicator."""
     if validation["passed"]:
         st.success("No conflicts")
         return
@@ -182,3 +217,14 @@ def render_violation_badge(validation: ValidationResult) -> None:
             violation_type = violation.get("violation_type", "UNKNOWN")
             description = violation.get("description", "")
             st.write(f"- {event_name} [{violation_type}]: {description}")
+
+
+def render_collapsed_view(state: AgentState) -> None:
+    """Backward-compatible helper for the all-candidates-identical case."""
+    st.info("All three strategies produced the same schedule.")
+    render_calendar_view(state)
+
+
+def render_all_candidates(state: AgentState) -> None:
+    """Deprecated: kept as a thin wrapper around `render_calendar_view`."""
+    render_calendar_view(state)

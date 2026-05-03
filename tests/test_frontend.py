@@ -291,15 +291,46 @@ class TestApprovalControls:
     """Test strategy approval/rejection button behavior."""
 
     def test_identical_candidates_approve(self, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setattr(approval_controls.st, "button", lambda *args, **kwargs: True)
+        button_presses = iter((True, False))
+        monkeypatch.setattr(
+            approval_controls.st,
+            "button",
+            lambda *args, **kwargs: next(button_presses),
+        )
+        monkeypatch.setattr(
+            approval_controls.st,
+            "columns",
+            lambda _count: (_DummyColumn(), _DummyColumn()),
+        )
         monkeypatch.setattr(approval_controls.st, "divider", lambda: None)
 
         action, strategy = approval_controls.render_strategy_buttons(candidates_identical=True)
 
         assert (action, strategy) == ("approve", "deadline_first")
 
+    def test_approve_uses_active_strategy(self, monkeypatch: pytest.MonkeyPatch):
+        button_presses = iter((True, False))
+        monkeypatch.setattr(
+            approval_controls.st,
+            "button",
+            lambda *args, **kwargs: next(button_presses),
+        )
+        monkeypatch.setattr(
+            approval_controls.st,
+            "columns",
+            lambda _count: (_DummyColumn(), _DummyColumn()),
+        )
+        monkeypatch.setattr(approval_controls.st, "divider", lambda: None)
+
+        action, strategy = approval_controls.render_strategy_buttons(
+            candidates_identical=False,
+            active_strategy="energy_aware",
+        )
+
+        assert (action, strategy) == ("approve", "energy_aware")
+
     def test_reject_all(self, monkeypatch: pytest.MonkeyPatch):
-        button_presses = iter((False, False, False, True))
+        button_presses = iter((False, True))
 
         monkeypatch.setattr(
             approval_controls.st,
@@ -309,10 +340,13 @@ class TestApprovalControls:
         monkeypatch.setattr(
             approval_controls.st,
             "columns",
-            lambda _count: (_DummyColumn(), _DummyColumn(), _DummyColumn()),
+            lambda _count: (_DummyColumn(), _DummyColumn()),
         )
         monkeypatch.setattr(approval_controls.st, "divider", lambda: None)
 
-        action, strategy = approval_controls.render_strategy_buttons(candidates_identical=False)
+        action, strategy = approval_controls.render_strategy_buttons(
+            candidates_identical=False,
+            active_strategy="min_fragmentation",
+        )
 
         assert (action, strategy) == ("reject", None)
