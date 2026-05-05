@@ -81,7 +81,11 @@ def fetch_events_node(state: AgentState) -> dict[str, Any]:
    elif settings.CALENDAR_MODE == "live":
       from src.calendar_api.events import fetch_busy_blocks
 
-      busy_blocks = fetch_busy_blocks(time_min, time_max)
+      busy_blocks = fetch_busy_blocks(
+         time_min,
+         time_max,
+         calendar_id=settings.GOOGLE_CALENDAR_ID,
+      )
    else:
       raise ValueError(
          f"fetch_events_node: unknown CALENDAR_MODE {settings.CALENDAR_MODE!r}; "
@@ -108,6 +112,7 @@ def fetch_events_node(state: AgentState) -> dict[str, Any]:
          "horizon_end": time_max.isoformat(),
          "work_start": work_start.isoformat(timespec="minutes"),
          "work_end": work_end.isoformat(timespec="minutes"),
+         "calendar_id": settings.GOOGLE_CALENDAR_ID,
       },
    )
 
