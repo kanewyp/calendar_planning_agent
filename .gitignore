@@ -33,6 +33,7 @@ htmlcov/
 # Google OAuth tokens — NEVER commit these
 token.json
 credentials.json
+google-credentials.json
 
 # Streamlit
 .streamlit/secrets.toml

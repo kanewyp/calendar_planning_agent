@@ -14,8 +14,10 @@
 from __future__ import annotations
 
 import datetime
+from typing import Any
 
 from src.calendar_api.free_slots import compute_free_slots
+from src.calendar_api.events import create_events_batch, fetch_busy_blocks
 from src.calendar_api.mock_calendar import create_mock_event, fetch_mock_busy_blocks
 
 
@@ -247,3 +249,106 @@ class TestMockCalendar:
         assert response["status"] == "confirmed"
         assert response["start"]["dateTime"] == "2026-04-06T10:00:00+00:00"
         assert response["end"]["dateTime"] == "2026-04-06T11:00:00+00:00"
+
+
+class TestLiveCalendarEvents:
+    """Unit tests for live Google Calendar adapters (API calls mocked)."""
+
+    def test_fetch_busy_blocks_includes_all_day_and_handles_pagination(self, monkeypatch):
+        """fetch_busy_blocks should parse both timed and all-day events across pages."""
+
+        class _EventsListCall:
+            def __init__(self, response: dict[str, Any]):
+                self._response = response
+
+            def execute(self) -> dict[str, Any]:
+                return self._response
+
+        class _FakeEventsResource:
+            def list(self, **kwargs):
+                token = kwargs.get("pageToken")
+                if token is None:
+                    return _EventsListCall(
+                        {
+                            "items": [
+                                {
+                                    "start": {"dateTime": "2026-04-06T09:00:00+00:00"},
+                                    "end": {"dateTime": "2026-04-06T10:00:00+00:00"},
+                                },
+                                {
+                                    "start": {"date": "2026-04-06"},
+                                    "end": {"date": "2026-04-07"},
+                                },
+                            ],
+                            "nextPageToken": "page-2",
+                        }
+                    )
+                return _EventsListCall(
+                    {
+                        "items": [
+                            {
+                                "start": {"dateTime": "2026-04-06T13:00:00+00:00"},
+                                "end": {"dateTime": "2026-04-06T14:00:00+00:00"},
+                            }
+                        ]
+                    }
+                )
+
+        class _FakeService:
+            def events(self):
+                return _FakeEventsResource()
+
+        monkeypatch.setattr(
+            "src.calendar_api.events.build_calendar_service",
+            lambda: _FakeService(),
+        )
+
+        blocks = fetch_busy_blocks(
+            time_min=dt(2026, 4, 6, 0),
+            time_max=dt(2026, 4, 6, 23, 59),
+        )
+
+        assert blocks == [
+            {
+                "start": "2026-04-06T00:00:00+00:00",
+                "end": "2026-04-07T00:00:00+00:00",
+            },
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T10:00:00+00:00",
+            },
+            {
+                "start": "2026-04-06T13:00:00+00:00",
+                "end": "2026-04-06T14:00:00+00:00",
+            },
+        ]
+
+    def test_create_events_batch_uses_default_description(self, monkeypatch):
+        """create_events_batch should tolerate missing description fields."""
+        calls: list[dict[str, Any]] = []
+
+        def _fake_create_event(**kwargs):
+            calls.append(kwargs)
+            return {"id": f"evt-{len(calls)}"}
+
+        monkeypatch.setattr("src.calendar_api.events.create_event", _fake_create_event)
+
+        responses = create_events_batch(
+            [
+                {
+                    "name": "Task A",
+                    "start": "2026-04-06T10:00:00+00:00",
+                    "end": "2026-04-06T11:00:00+00:00",
+                },
+                {
+                    "name": "Task B",
+                    "description": "Important",
+                    "start": "2026-04-06T12:00:00+00:00",
+                    "end": "2026-04-06T13:00:00+00:00",
+                },
+            ]
+        )
+
+        assert responses == [{"id": "evt-1"}, {"id": "evt-2"}]
+        assert calls[0]["description"] == ""
+        assert calls[1]["description"] == "Important"
