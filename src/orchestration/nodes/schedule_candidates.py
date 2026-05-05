@@ -14,9 +14,16 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
-from src.orchestration.debug_trace import make_trace_event, summarize_schedule, trace_update
+from src.orchestration.debug_trace import (
+    has_structural_tags,
+    make_trace_event,
+    summarize_schedule,
+    summarize_subtask_order,
+    trace_update,
+)
 from src.orchestration.state import AgentState
 from src.orchestration.heuristics.deadline_first import schedule_deadline_first
 from src.orchestration.heuristics.minimize_fragmentation import schedule_min_fragmentation
@@ -44,8 +51,11 @@ def deadline_first_node(state: AgentState) -> dict[str, Any]:
         "deadline_first",
         "candidate_deadline_first",
         candidate,
+        subtasks=subtasks,
         subtask_count=len(subtasks),
         free_slot_count=len(free_slots),
+        summary_extra={
+        },
     )
 
 
@@ -70,8 +80,12 @@ def min_fragmentation_node(state: AgentState) -> dict[str, Any]:
         "min_fragmentation",
         "candidate_min_fragmentation",
         candidate,
+        subtasks=subtasks,
         subtask_count=len(subtasks),
         free_slot_count=len(free_slots),
+        summary_extra={
+            "structural_mode": has_structural_tags(subtasks),
+        },
     )
 
 
@@ -106,8 +120,14 @@ def energy_aware_node(state: AgentState) -> dict[str, Any]:
         "energy_aware",
         "candidate_energy_aware",
         candidate,
+        subtasks=subtasks,
         subtask_count=len(subtasks),
         free_slot_count=len(free_slots),
+        summary_extra={
+            "energy_levels": energy_levels if isinstance(energy_levels, dict) else None,
+            "structural_mode": has_structural_tags(subtasks),
+        },
+        schedule_energy_levels=energy_levels if isinstance(energy_levels, dict) else None,
     )
 
 
@@ -116,17 +136,96 @@ def _candidate_update(
     state_key: str,
     candidate: list[dict[str, Any]],
     *,
+    subtasks: list[dict[str, Any]],
     subtask_count: int,
     free_slot_count: int,
+    summary_extra: dict[str, Any] | None = None,
+    schedule_energy_levels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    order_diagnostics = _order_diagnostics(subtasks, candidate)
+    summary = {
+        "strategy": strategy_name,
+        "scheduled_event_count": len(candidate),
+        "unscheduled_subtask_count": max(subtask_count - len(candidate), 0),
+        "free_slot_count": free_slot_count,
+        "subtask_order_before": summarize_subtask_order(subtasks),
+        "scheduled_order": _scheduled_order(candidate),
+        "chronological_order": order_diagnostics["chronological_order"],
+        "order_inversion_count": order_diagnostics["order_inversion_count"],
+    }
+    if summary_extra:
+        summary.update(summary_extra)
+
+    details = summarize_schedule(candidate, energy_levels=schedule_energy_levels)
+    details["order_inversions"] = order_diagnostics["order_inversions"]
+    details["order_inversion_sample_limit"] = order_diagnostics[
+        "order_inversion_sample_limit"
+    ]
+
     trace = make_trace_event(
         f"schedule_{strategy_name}",
-        summary={
-            "strategy": strategy_name,
-            "scheduled_event_count": len(candidate),
-            "unscheduled_subtask_count": max(subtask_count - len(candidate), 0),
-            "free_slot_count": free_slot_count,
-        },
-        details=summarize_schedule(candidate),
+        summary=summary,
+        details=details,
     )
     return {state_key: candidate, **trace_update(trace)}
+
+
+def _scheduled_order(candidate: list[dict[str, Any]]) -> list[str]:
+    return [event["name"] for event in candidate]
+
+
+def _chronological_events(candidate: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        candidate,
+        key=lambda event: datetime.datetime.fromisoformat(
+            event["start"].replace("Z", "+00:00")
+        ),
+    )
+
+
+def _order_diagnostics(
+    subtasks: list[dict[str, Any]],
+    candidate: list[dict[str, Any]],
+    sample_limit: int = 20,
+) -> dict[str, Any]:
+    chronological_events = _chronological_events(candidate)
+    chronological_order = _scheduled_order(chronological_events)
+    original_index = {subtask["name"]: index for index, subtask in enumerate(subtasks)}
+    scheduled_indices = [
+        original_index.get(event["name"])
+        for event in chronological_events
+    ]
+
+    inversions: list[dict[str, Any]] = []
+    inversion_count = 0
+    for earlier_position, earlier_index in enumerate(scheduled_indices):
+        if earlier_index is None:
+            continue
+        for later_position in range(earlier_position + 1, len(scheduled_indices)):
+            later_index = scheduled_indices[later_position]
+            if later_index is None or earlier_index <= later_index:
+                continue
+
+            inversion_count += 1
+            if len(inversions) >= sample_limit:
+                continue
+
+            earlier_event = chronological_events[earlier_position]
+            later_event = chronological_events[later_position]
+            inversions.append(
+                {
+                    "scheduled_before": earlier_event["name"],
+                    "scheduled_before_start": earlier_event["start"],
+                    "scheduled_before_original_index": earlier_index,
+                    "should_have_preceded": later_event["name"],
+                    "should_have_preceded_start": later_event["start"],
+                    "should_have_preceded_original_index": later_index,
+                }
+            )
+
+    return {
+        "chronological_order": chronological_order,
+        "order_inversion_count": inversion_count,
+        "order_inversions": inversions,
+        "order_inversion_sample_limit": sample_limit,
+    }
