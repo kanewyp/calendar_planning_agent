@@ -34,6 +34,8 @@ RULES:
 - Field names are case-sensitive. Do NOT use "duration" or "time" — use "duration_minutes".
 - Subtasks must reflect genuine domain knowledge, be ordered logically, and
   be sized realistically for focused work sessions.
+- Prefer 3–8 subtasks. Keep each description concise so the JSON response is
+  complete and not truncated.
 - Preserve dependency-safe learning flow. Do not place prerequisites after dependents.
 - At the START of each description, include structural tags used by the scheduler:
     [group:<block_id>] [seq:<integer>] [shuffle:yes|no]

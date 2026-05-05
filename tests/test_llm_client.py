@@ -17,6 +17,7 @@ from src.llm_client.client import (
     GEMINI_OPENAI_BASE_URL,
     MAX_RETRIES,
     VERTEX_OPENAI_BASE_URL_TEMPLATE,
+    _parse_json_with_recovery,
     call_llm_json,
     call_llm_text,
 )
@@ -56,6 +57,32 @@ class TestCallLlmJson:
         ) as m:
             assert call_llm_json("prompt") == {"ok": True}
         assert m.call_count == 2
+
+    def test_recovery_handles_markdown_fences_and_trailing_commas(self):
+        text = """```json
+        [
+            {"name": "Task", "done": True, "notes": None,},
+        ]
+        ```"""
+
+        assert _parse_json_with_recovery(text) == [
+            {"name": "Task", "done": True, "notes": None}
+        ]
+
+    def test_recovery_extracts_json_from_surrounding_text(self):
+        text = 'Here is the JSON:\n[{"name": "Task"}]\nHope this helps.'
+
+        assert _parse_json_with_recovery(text) == [{"name": "Task"}]
+
+    def test_retry_prompt_includes_parse_error_context(self):
+        responses = ['[{"name": "unterminated}', '[{"name": "Task"}]']
+
+        with patch(_PATCH_TARGET, side_effect=responses) as m:
+            assert call_llm_json("prompt") == [{"name": "Task"}]
+
+        retry_prompt = m.call_args_list[1].args[0]
+        assert "could not be parsed as JSON" in retry_prompt
+        assert "Unterminated string" in retry_prompt
 
 
 class TestCallLlmText:
