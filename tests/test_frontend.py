@@ -232,8 +232,28 @@ class TestDebugPanel:
                     "summary": {"provider": "vertex_ai", "model": "google/gemini"},
                     "details": {
                         "items": [
-                            {"name": "Set up Python", "duration_minutes": 60},
+                            {
+                                "name": "Set up Python",
+                                "duration_minutes": 60,
+                                "group": "foundations",
+                                "seq": 1,
+                                "shuffle": False,
+                            },
                             {"name": "Build calculator", "duration_minutes": 90},
+                        ]
+                    },
+                },
+                {
+                    "node": "schedule_energy_aware",
+                    "status": "success",
+                    "summary": {"energy_levels": {"morning": "high"}},
+                    "details": {
+                        "events": [
+                            {
+                                "name": "Set up Python",
+                                "period": "morning",
+                                "period_energy_level": "high",
+                            }
                         ]
                     },
                 },
@@ -257,6 +277,9 @@ class TestDebugPanel:
         assert "decompose_goal [success]" in report
         assert "provider: vertex_ai" in report
         assert "Set up Python" in report
+        assert "group=foundations" in report
+        assert "period=morning" in report
+        assert "energy=high" in report
         assert "deadline_first: passed=True violations=0" in report
 
 
