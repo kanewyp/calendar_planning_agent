@@ -17,9 +17,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load .env from project root (two levels up from this file)
+# Load .env from project root (two levels up from this file).
+# override=True ensures .env always wins over stale shell exports.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_PROJECT_ROOT / ".env")
+load_dotenv(_PROJECT_ROOT / ".env", override=True)
 
 
 class Settings:
@@ -48,6 +49,7 @@ class Settings:
     GOOGLE_CLIENT_SECRET_FILE: str = os.getenv(
         "GOOGLE_CLIENT_SECRET_FILE", "credentials.json"
     )
+    GOOGLE_CALENDAR_ID: str = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 
     # "mock" → use src/calendar_api/mock_calendar.py
     # "live" → use real Google Calendar OAuth
