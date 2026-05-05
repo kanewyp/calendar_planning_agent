@@ -4,121 +4,58 @@
 # Places subtasks in the LARGEST available time blocks first to avoid
 # scattering short sessions across the calendar.
 #
-# This is a pure function with no LLM or API calls — fully unit-testable.
+# Pure function with no LLM or API calls — fully unit-testable.
 # =============================================================================
 
 from __future__ import annotations
 
 import datetime
-import re
 
 from src.orchestration.state import Subtask, ProposedEvent
-
-
-_TAG_PATTERN = re.compile(r"\[(?P<key>[a-z_]+)\s*:\s*(?P<value>[^\]]+)\]", re.IGNORECASE)
-
-
-def _tag_map(subtask: Subtask) -> dict[str, str]:
-    text = f"{subtask['name']} {subtask['description']}"
-    return {
-        match.group("key").strip().lower(): match.group("value").strip().lower()
-        for match in _TAG_PATTERN.finditer(text)
-    }
-
-
-def _group_id(subtask: Subtask) -> str:
-    tags = _tag_map(subtask)
-    return tags.get("group", "default")
-
-
-def _seq_id(subtask: Subtask) -> int | None:
-    tags = _tag_map(subtask)
-    raw = tags.get("seq") or tags.get("order")
-    if raw is None:
-        return None
-    return int(raw) if raw.isdigit() else None
-
-
-def _shuffle_allowed(subtask: Subtask) -> bool:
-    tags = _tag_map(subtask)
-    return tags.get("shuffle", "no") in {"yes", "true", "1"}
-
-
-def _has_any_structural_tags(subtasks: list[Subtask]) -> bool:
-    return any(_TAG_PATTERN.search(f"{s['name']} {s['description']}") for s in subtasks)
-
-
-def _safe_structural_shuffle(subtasks: list[Subtask]) -> list[Subtask]:
-    """Only reorder explicitly shufflable tasks within same [group:*] block.
-
-    Safety rules:
-    - Preserve original order by default.
-    - Any task with [seq:n]/[order:n] is hard-locked by sequence.
-    - Reorder happens only in contiguous runs where all tasks have [shuffle:yes]
-      and no sequence ids.
-    """
-    grouped: dict[str, list[Subtask]] = {}
-    group_order: list[str] = []
-    for subtask in subtasks:
-        gid = _group_id(subtask)
-        if gid not in grouped:
-            grouped[gid] = []
-            group_order.append(gid)
-        grouped[gid].append(subtask)
-
-    result: list[Subtask] = []
-    for gid in group_order:
-        block = grouped[gid]
-        i = 0
-        while i < len(block):
-            if _seq_id(block[i]) is not None or not _shuffle_allowed(block[i]):
-                result.append(block[i])
-                i += 1
-                continue
-
-            j = i
-            run: list[Subtask] = []
-            while j < len(block) and _seq_id(block[j]) is None and _shuffle_allowed(block[j]):
-                run.append(block[j])
-                j += 1
-
-            run_sorted = sorted(run, key=lambda s: int(s["duration_minutes"]), reverse=True)
-            result.extend(run_sorted)
-            i = j
-
-    return result
+from src.orchestration.heuristics._structural import (
+    has_any_structural_tags,
+    safe_structural_shuffle,
+)
 
 
 def schedule_min_fragmentation(
     subtasks: list[Subtask],
     free_slots: list[dict[str, str]],
 ) -> list[ProposedEvent]:
-    """Schedule subtasks in large slots with phase-safe local reordering.
+    """Schedule subtasks into the largest fitting slots.
 
     Args:
-        subtasks: Ordered list of subtasks from goal decomposition.
-        free_slots: Chronologically sorted list of
-                    {"start": <ISO>, "end": <ISO>} free-slot dicts.
+        subtasks: Ordered list of subtasks. Order is preserved by default;
+                  contiguous runs of [shuffle:yes] tasks within the same
+                  [group:X] may be locally reordered (longer first) so
+                  large tasks claim the biggest slots.
+        free_slots: Chronologically sorted list of {"start", "end"} dicts.
 
     Returns:
         List of ProposedEvent dicts.
 
-     ALGORITHM:
-     1. Infer each subtask's coarse phase (setup/learn/implement/project/other).
-     2. Preserve phase order based on first appearance in the original list.
-     3. Within each phase only, allow local reorder (longer first) to reduce
-         slot fragmentation while keeping phase-level dependency flow.
-     4. Place each chosen subtask in the largest available slot that fits.
-     5. Split remainder slots back into the pool and continue.
-     6. Return events sorted chronologically.
-
-    RATIONALE:
-    This keeps the learning flow intact at the phase level, while still
-    reducing fragmentation through limited within-phase optimization.
+    ORDERING GUARANTEE:
+    Each task's slot must start at or after the previous task's end time
+    (min_allowed_start). Without this, a smaller task can slip into the
+    leftover of an earlier slot that a larger task skipped — producing a
+    calendar where task N+1 appears before task N even though the processing
+    loop ran in the right order. The constraint grows monotonically so it
+    never blocks a valid later slot.
 
     EDGE CASES:
     - Same as deadline_first: handle unplaceable subtasks gracefully.
     """
+    if has_any_structural_tags(subtasks):
+        subtasks_for_scheduling = safe_structural_shuffle(
+            subtasks,
+            run_sort_key=lambda s: int(s["duration_minutes"]),
+        )
+    else:
+        # No structural tags: STRICTLY preserve LLM-provided order.
+        # Reordering by duration globally would risk violating any
+        # undeclared dependencies.
+        subtasks_for_scheduling = list(subtasks)
+
     slot_pool: list[tuple[datetime.datetime, datetime.datetime]] = [
         (
             datetime.datetime.fromisoformat(slot["start"]),
@@ -128,26 +65,20 @@ def schedule_min_fragmentation(
     ]
 
     scheduled: list[ProposedEvent] = []
-
-    use_structural_mode = _has_any_structural_tags(subtasks)
-
-    if use_structural_mode:
-        subtasks_for_scheduling = _safe_structural_shuffle(subtasks)
-    else:
-        # Backward-compatible mode: original behavior when no explicit phase cues exist.
-        subtasks_for_scheduling = sorted(
-            subtasks,
-            key=lambda subtask: subtask["duration_minutes"],
-            reverse=True,
-        )
+    # Grows monotonically: each task must start no earlier than where the
+    # previous task ended, so the calendar order matches the dependency order.
+    min_allowed_start: datetime.datetime | None = None
 
     for subtask in subtasks_for_scheduling:
         duration = datetime.timedelta(minutes=subtask["duration_minutes"])
         chosen_idx: int | None = None
         max_slot_size: datetime.timedelta | None = None
 
-        # Find the LARGEST slot that can fit this subtask
+        # Find the LARGEST slot that can fit this subtask and starts
+        # at or after min_allowed_start.
         for idx, (slot_start, slot_end) in enumerate(slot_pool):
+            if min_allowed_start is not None and slot_start < min_allowed_start:
+                continue
             slot_duration = slot_end - slot_start
             if slot_duration >= duration:
                 if max_slot_size is None or slot_duration > max_slot_size:
@@ -168,6 +99,8 @@ def schedule_min_fragmentation(
                 end=event_end.isoformat(),
             )
         )
+
+        min_allowed_start = event_end
 
         if event_end < slot_end:
             slot_pool.append((event_end, slot_end))
