@@ -222,76 +222,126 @@ class TestDeadlineFirstHeuristic:
 class TestMinFragmentationHeuristic:
     """Test the minimize-fragmentation scheduling strategy."""
 
-    def test_longest_subtask_gets_largest_slot(
-        self, sample_subtasks, sample_free_slots
-    ):
-        """The longest subtask should be placed in the largest free slot.
+    def test_structural_mode_uses_largest_slot_on_earliest_available_day(self):
+        subtasks = [
+            {
+                "name": "Short peer",
+                "description": "[group:practice] [shuffle:yes] [complexity:low] Short task.",
+                "duration_minutes": 30,
+            },
+            {
+                "name": "Long peer",
+                "description": "[group:practice] [shuffle:yes] [complexity:high] Long task.",
+                "duration_minutes": 90,
+            },
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T10:00:00+00:00",
+            },
+            {
+                "start": "2026-04-06T11:00:00+00:00",
+                "end": "2026-04-06T13:00:00+00:00",
+            },
+            {
+                "start": "2026-04-07T09:00:00+00:00",
+                "end": "2026-04-07T13:00:00+00:00",
+            },
+        ]
 
-        STEPS:
-        1. Call schedule_min_fragmentation(sample_subtasks, sample_free_slots).
-        2. Identify the longest subtask and the largest slot.
-        3. Assert the longest subtask was placed in (or at the start of)
-           the largest slot.
-        """
-        events = schedule_min_fragmentation(sample_subtasks, sample_free_slots)
+        events = schedule_min_fragmentation(subtasks, free_slots)
 
-        assert len(events) == len(sample_subtasks)
-        longest_subtask = max(sample_subtasks, key=lambda s: s["duration_minutes"])
-        largest_slot = max(
-            sample_free_slots,
-            key=lambda sl: (
-                datetime.datetime.fromisoformat(sl["end"]) -
-                datetime.datetime.fromisoformat(sl["start"])
-            ),
-        )
-        longest_event = next(e for e in events if e["name"] == longest_subtask["name"])
-        assert longest_event["start"] == largest_slot["start"]
-        # Output is chronologically ordered
-        starts = [e["start"] for e in events]
-        assert starts == sorted(starts)
+        assert [event["name"] for event in events] == ["Long peer", "Short peer"]
+        assert events[0]["start"] == "2026-04-06T11:00:00+00:00"
+        assert events[1]["start"] == "2026-04-06T12:30:00+00:00"
+
+    def test_phase_order_groups_before_later_phases(self):
+        subtasks = [
+            {
+                "name": "A1",
+                "description": "[group:a] [shuffle:no] [complexity:low] First phase task.",
+                "duration_minutes": 30,
+            },
+            {
+                "name": "B1",
+                "description": "[group:b] [shuffle:no] [complexity:medium] Second phase task.",
+                "duration_minutes": 30,
+            },
+            {
+                "name": "A2",
+                "description": "[group:a] [shuffle:no] [complexity:low] First phase follow-up.",
+                "duration_minutes": 30,
+            },
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T12:00:00+00:00",
+            },
+        ]
+
+        events = schedule_min_fragmentation(subtasks, free_slots)
+
+        assert [event["name"] for event in events] == ["A1", "A2", "B1"]
 
 
 class TestEnergyAwareHeuristic:
     """Test the energy-aware scheduling strategy."""
 
-    def test_heavy_tasks_in_morning(self, sample_subtasks, sample_free_slots):
-        """Subtasks >= 60 min should be placed in morning slots when possible.
+    def test_satisficing_uses_near_match_before_far_perfect_match(self):
+        subtasks = [
+            {
+                "name": "Hard topic",
+                "description": "[group:deep] [shuffle:no] [complexity:high] Deep work.",
+                "duration_minutes": 60,
+            }
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T13:00:00+00:00",
+                "end": "2026-04-06T14:00:00+00:00",
+            },
+            {
+                "start": "2026-04-10T09:00:00+00:00",
+                "end": "2026-04-10T10:00:00+00:00",
+            },
+        ]
 
-        STEPS:
-        1. Call schedule_energy_aware(sample_subtasks, sample_free_slots).
-        2. Identify events with duration >= 60 min.
-        3. Assert their start times are before 12:00.
-        """
-        events = schedule_energy_aware(sample_subtasks, sample_free_slots)
-        heavy_names = {
-            s["name"] for s in sample_subtasks if s["duration_minutes"] >= 60
-        }
-        morning_boundary = datetime.time(12, 0)
-        for event in events:
-            if event["name"] in heavy_names:
-                start_time = datetime.datetime.fromisoformat(event["start"]).time()
-                assert start_time < morning_boundary, (
-                    f"Heavy task '{event['name']}' placed after noon at {start_time}"
-                )
+        events = schedule_energy_aware(
+            subtasks,
+            free_slots,
+            {"morning": "high", "afternoon": "medium", "evening": "low"},
+        )
 
-    def test_light_tasks_in_afternoon(self, sample_subtasks, sample_free_slots):
-        """Subtasks < 60 min should be placed in afternoon slots when possible.
+        assert events[0]["start"] == "2026-04-06T13:00:00+00:00"
 
-        STEPS:
-        1. Same as above, but check that short tasks start after 12:00.
-        """
-        # sample_subtasks has one light task: 'Set up dev environment' (30 min)
-        events = schedule_energy_aware(sample_subtasks, sample_free_slots)
-        light_names = {
-            s["name"] for s in sample_subtasks if s["duration_minutes"] < 60
-        }
-        morning_boundary = datetime.time(12, 0)
-        for event in events:
-            if event["name"] in light_names:
-                start_time = datetime.datetime.fromisoformat(event["start"]).time()
-                assert start_time >= morning_boundary, (
-                    f"Light task '{event['name']}' placed in morning at {start_time}"
-                )
+    def test_user_energy_profile_drives_slot_choice(self):
+        subtasks = [
+            {
+                "name": "Light admin",
+                "description": "[group:admin] [shuffle:no] [complexity:low] Simple setup.",
+                "duration_minutes": 30,
+            }
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T09:30:00+00:00",
+            },
+            {
+                "start": "2026-04-06T17:00:00+00:00",
+                "end": "2026-04-06T17:30:00+00:00",
+            },
+        ]
+
+        events = schedule_energy_aware(
+            subtasks,
+            free_slots,
+            {"morning": "high", "afternoon": "medium", "evening": "low"},
+        )
+
+        assert events[0]["start"] == "2026-04-06T17:00:00+00:00"
 
 
 class TestScheduleCandidateNodes:
@@ -335,11 +385,24 @@ class TestScheduleCandidateNodes:
         assert trace["details"]["events"][0]["period_energy_level"] == "low"
         assert trace["details"]["order_inversions"] == []
 
-    def test_schedule_trace_flags_chronological_order_inversions(self):
+    def test_schedule_trace_uses_phase_order_for_inversion_checks(self):
         state = {
             "subtasks": [
-                {"name": "First dependency", "description": "Do first.", "duration_minutes": 30},
-                {"name": "Long follow-up", "description": "Do second.", "duration_minutes": 90},
+                {
+                    "name": "A1",
+                    "description": "[group:a] [shuffle:no] [complexity:low] First phase task.",
+                    "duration_minutes": 30,
+                },
+                {
+                    "name": "B1",
+                    "description": "[group:b] [shuffle:no] [complexity:medium] Second phase task.",
+                    "duration_minutes": 30,
+                },
+                {
+                    "name": "A2",
+                    "description": "[group:a] [shuffle:no] [complexity:low] First phase follow-up.",
+                    "duration_minutes": 30,
+                },
             ],
             "free_slots": [
                 {
@@ -353,24 +416,22 @@ class TestScheduleCandidateNodes:
 
         trace = result["debug_trace"][0]
         assert trace["summary"]["subtask_order_before"] == [
-            "First dependency",
-            "Long follow-up",
+            "A1",
+            "B1",
+            "A2",
+        ]
+        assert trace["summary"]["expected_dependency_order"] == [
+            "A1",
+            "A2",
+            "B1",
         ]
         assert trace["summary"]["chronological_order"] == [
-            "Long follow-up",
-            "First dependency",
+            "A1",
+            "A2",
+            "B1",
         ]
-        assert trace["summary"]["order_inversion_count"] == 1
-        assert trace["details"]["order_inversions"] == [
-            {
-                "scheduled_before": "Long follow-up",
-                "scheduled_before_start": "2026-04-06T09:00:00+00:00",
-                "scheduled_before_original_index": 1,
-                "should_have_preceded": "First dependency",
-                "should_have_preceded_start": "2026-04-06T10:30:00+00:00",
-                "should_have_preceded_original_index": 0,
-            }
-        ]
+        assert trace["summary"]["order_inversion_count"] == 0
+        assert trace["details"]["order_inversions"] == []
 
 
 class TestValidateCandidates:
