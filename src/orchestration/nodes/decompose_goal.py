@@ -146,7 +146,9 @@ CRITICAL — common failure modes to avoid:
 - A 60-minute task with [complexity:high] is almost certainly mis-tagged or mis-estimated.
 - If most of your subtasks have the same duration_minutes, you have NOT differentiated
   by complexity. Re-estimate.
-- No single subtask may exceed {max_session} minutes.
+- HARD LIMIT: No single subtask may exceed {max_session} minutes. This is a hard
+  system constraint. If a topic naturally takes longer, split it into two subtasks
+  in separate groups. Never emit a duration_minutes value above {max_session}.
 
 ================================================================
 GENERAL RULES
@@ -344,10 +346,10 @@ def decompose_goal_node(state: AgentState) -> dict[str, Any]:
                 f"Goal decomposition failed: subtask {index} has an invalid duration"
             )
         if duration > max_session:
-            raise ValueError(
-                f"Goal decomposition failed: subtask {index} duration {duration} "
-                f"exceeds max session {max_session}"
-            )
+            # Clamp rather than crash: the LLM sometimes ignores the max-session
+            # constraint in the prompt. Silently trimming keeps the plan usable;
+            # the trace will record the original value for review.
+            duration = max_session
 
         subtasks.append(
             Subtask(

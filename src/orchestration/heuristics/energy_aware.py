@@ -25,6 +25,9 @@ from src.orchestration.heuristics._structural import (
 _MORNING_END = datetime.time(12, 0)
 _AFTERNOON_END = datetime.time(17, 0)
 
+# Maximum possible energy score difference (high=3, low=1 → max diff = 2).
+_MAX_SCORE_DIFF = 2
+
 
 def _classify_slot_by_time(slot_start: datetime.datetime) -> str:
     """Classify a time slot into morning/afternoon/evening."""
@@ -49,7 +52,8 @@ def schedule_energy_aware(
         subtasks: Ordered list of subtasks. Order is preserved by default;
                   contiguous runs of [shuffle:yes] tasks within the same
                   [group:X] may be locally reordered (higher complexity
-                  first) so demanding tasks claim peak-energy slots.
+                  first) so demanding tasks get first pick of peak-energy
+                  slots.
         free_slots: Chronologically sorted list of {"start", "end"} dicts.
         user_energy_levels: e.g. {"morning": "high", "afternoon": "medium",
                              "evening": "low"}. Defaults to that mapping.
@@ -58,31 +62,34 @@ def schedule_energy_aware(
     Returns:
         List of ProposedEvent dicts, sorted chronologically.
 
-    ALGORITHM:
-    1. Resolve each period's energy score from user_energy_levels.
-    2. Decide ordering:
-       - With structural tags → safe_structural_shuffle by complexity desc.
-       - Without tags → preserve LLM order strictly.
-    3. For each subtask, score every ELIGIBLE slot by
-       abs(slot_energy - task_complexity); a slot is eligible only if it
-       starts at or after min_allowed_start (the end time of the previous
-       task). Tie-break by earliest start so equal-fit slots still front-load.
-    4. Place the task in the best-scoring eligible slot, return remainder
-       to pool.
-    5. Sort scheduled events chronologically and return.
+    ALGORITHM — SATISFICING ENERGY MATCH:
+    For each task, the slot search runs in passes of increasing tolerance:
+      Pass 0: find the EARLIEST slot with score_diff == 0 (perfect match).
+      Pass 1: find the EARLIEST slot with score_diff == 1 (near match).
+      Pass 2: find the EARLIEST slot with score_diff == 2 (any slot).
+    The first pass that yields a result is used; subsequent passes are skipped.
+
+    WHY SATISFICING INSTEAD OF GLOBAL OPTIMISATION:
+    The previous implementation used key=(score_diff, slot_start) and picked
+    the globally best energy match across ALL future slots. A perfect-match
+    slot on May 15 would always beat a near-match slot on May 7. When
+    min_allowed_start then advanced to May 15, the remaining 10+ tasks had
+    only 4 days of calendar left and fell off the deadline.
+
+    Satisficing solves this: within each energy tier, we always pick the
+    EARLIEST eligible slot, so the schedule stays anchored near the present.
+    A task only jumps to a far-future slot if no nearer slot of any energy
+    quality is available at all.
 
     ORDERING GUARANTEE:
     min_allowed_start grows monotonically after each placement. Slots that
-    start before it are never considered, so the calendar order always
-    matches the dependency order even when energy optimisation would
-    otherwise pick an earlier slot for a later task.
+    start before it are never considered, so calendar order always matches
+    dependency order.
 
     KEY DESIGN POINTS:
-    - The user's actual energy_levels argument drives placement — no
-      hard-coded "morning preference" that ignored night-owl users.
+    - The user's actual energy_levels argument drives placement.
     - Complexity comes from the explicit [complexity:*] tag if present;
-      duration is only a fallback because the LLM's duration estimates
-      are not always reliable.
+      duration is only a fallback.
     """
     if user_energy_levels is None:
         user_energy_levels = {
@@ -91,23 +98,20 @@ def schedule_energy_aware(
             "evening": "low",
         }
 
-    # Normalise energy labels to numeric scores. The COMPLEXITY_SCORE table
-    # is reused intentionally — both scales share the low/medium/high
-    # vocabulary so they can be compared directly.
     energy_scores = {
         period: COMPLEXITY_SCORE.get(level, 2)
         for period, level in user_energy_levels.items()
     }
 
-    # Parse and sort slots chronologically.
-    slot_pool: list[tuple[datetime.datetime, datetime.datetime]] = [
+    # Sort chronologically so each pass scans slots in temporal order and
+    # the first match found is the earliest eligible one.
+    slot_pool: list[tuple[datetime.datetime, datetime.datetime]] = sorted(
         (
             datetime.datetime.fromisoformat(slot["start"]),
             datetime.datetime.fromisoformat(slot["end"]),
         )
         for slot in free_slots
-    ]
-    slot_pool.sort(key=lambda interval: interval[0])
+    )
 
     if has_any_structural_tags(subtasks):
         subtasks_for_scheduling = safe_structural_shuffle(
@@ -115,43 +119,42 @@ def schedule_energy_aware(
             run_sort_key=complexity_score,
         )
     else:
-        # No structural tags: STRICTLY preserve LLM-provided order.
         subtasks_for_scheduling = list(subtasks)
 
     scheduled: list[ProposedEvent] = []
     # Grows monotonically: each task must start no earlier than where the
-    # previous task ended, so the calendar order matches the dependency order.
+    # previous task ended, so calendar order matches dependency order.
     min_allowed_start: datetime.datetime | None = None
 
     for subtask in subtasks_for_scheduling:
         duration = datetime.timedelta(minutes=subtask["duration_minutes"])
         task_complexity = complexity_score(subtask)
+        chosen_idx: int | None = None
 
-        # Score every ELIGIBLE slot. A slot is eligible only if it starts
-        # at or after min_allowed_start. Lower diff = better energy match;
-        # tie-break by earliest start so equal-fit slots still front-load.
-        best_idx: int | None = None
-        best_key: tuple[int, datetime.datetime] | None = None
+        # Satisficing multi-pass: try perfect energy match first, then
+        # progressively relax until any eligible slot is accepted.
+        for target_diff in range(_MAX_SCORE_DIFF + 1):
+            for idx, (slot_start, slot_end) in enumerate(slot_pool):
+                if min_allowed_start is not None and slot_start < min_allowed_start:
+                    continue
+                if slot_end - slot_start < duration:
+                    continue
 
-        for idx, (slot_start, slot_end) in enumerate(slot_pool):
-            if min_allowed_start is not None and slot_start < min_allowed_start:
-                continue
-            if slot_end - slot_start < duration:
-                continue
+                slot_period = _classify_slot_by_time(slot_start)
+                slot_energy_score = energy_scores.get(slot_period, 2)
+                score_diff = abs(slot_energy_score - task_complexity)
 
-            slot_period = _classify_slot_by_time(slot_start)
-            slot_energy_score = energy_scores.get(slot_period, 2)
-            score_diff = abs(slot_energy_score - task_complexity)
+                if score_diff == target_diff:
+                    chosen_idx = idx
+                    break  # earliest slot in this tier found; stop inner scan
 
-            key = (score_diff, slot_start)
-            if best_key is None or key < best_key:
-                best_key = key
-                best_idx = idx
+            if chosen_idx is not None:
+                break  # best available tier found; skip remaining passes
 
-        if best_idx is None:
+        if chosen_idx is None:
             continue
 
-        slot_start, slot_end = slot_pool.pop(best_idx)
+        slot_start, slot_end = slot_pool.pop(chosen_idx)
         event_end = slot_start + duration
 
         scheduled.append(
@@ -165,9 +168,15 @@ def schedule_energy_aware(
 
         min_allowed_start = event_end
 
+        # Return remainder to pool in sorted order so subsequent passes
+        # scan slots correctly.
         if event_end < slot_end:
-            slot_pool.append((event_end, slot_end))
-            slot_pool.sort(key=lambda interval: interval[0])
+            remainder = (event_end, slot_end)
+            insert_at = next(
+                (i for i, (s, _) in enumerate(slot_pool) if s >= event_end),
+                len(slot_pool),
+            )
+            slot_pool.insert(insert_at, remainder)
 
     scheduled.sort(key=lambda event: event["start"])
     return scheduled
