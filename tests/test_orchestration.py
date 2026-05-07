@@ -24,6 +24,7 @@ from src.orchestration.nodes.decompose_goal import decompose_goal_node
 from src.orchestration.nodes.fetch_events import fetch_events_node
 from src.orchestration.nodes.generate_rationales import generate_rationales_node
 from src.orchestration.nodes.schedule_candidates import (
+    deadline_first_node,
     energy_aware_node,
     min_fragmentation_node,
 )
@@ -219,6 +220,48 @@ class TestDeadlineFirstHeuristic:
         assert events[1]["start"] == "2026-04-06T10:30:00+00:00"
         assert events[1]["end"]   == "2026-04-06T11:00:00+00:00"
 
+    def test_break_minutes_adds_buffer_between_tasks(self):
+        subtasks = [
+            {"name": "First task", "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            },
+        ]
+
+        events = schedule_deadline_first(subtasks, free_slots, break_minutes=10)
+
+        assert events[0]["start"] == "2026-04-06T09:00:00+00:00"
+        assert events[0]["end"] == "2026-04-06T09:30:00+00:00"
+        assert events[1]["start"] == "2026-04-06T09:40:00+00:00"
+        assert events[1]["end"] == "2026-04-06T10:10:00+00:00"
+
+    def test_break_minutes_can_push_next_task_to_next_slot(self):
+        subtasks = [
+            {"name": "First task", "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T09:30:00+00:00",
+            },
+            {
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T10:30:00+00:00",
+            },
+        ]
+
+        events = schedule_deadline_first(subtasks, free_slots, break_minutes=15)
+
+        assert [event["start"] for event in events] == [
+            "2026-04-06T09:00:00+00:00",
+            "2026-04-06T10:00:00+00:00",
+        ]
+
 
 class TestMinFragmentationHeuristic:
     """Test the minimize-fragmentation scheduling strategy."""
@@ -286,6 +329,23 @@ class TestMinFragmentationHeuristic:
 
         assert [event["name"] for event in events] == ["A1", "A2", "B1"]
 
+    def test_break_minutes_adds_buffer_between_tasks(self):
+        subtasks = [
+            {"name": "First task", "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            },
+        ]
+
+        events = schedule_min_fragmentation(subtasks, free_slots, break_minutes=10)
+
+        assert events[0]["end"] == "2026-04-06T09:30:00+00:00"
+        assert events[1]["start"] == "2026-04-06T09:40:00+00:00"
+
 
 class TestEnergyAwareHeuristic:
     """Test the energy-aware scheduling strategy."""
@@ -344,8 +404,51 @@ class TestEnergyAwareHeuristic:
 
         assert events[0]["start"] == "2026-04-06T17:00:00+00:00"
 
+    def test_break_minutes_adds_buffer_between_tasks(self):
+        subtasks = [
+            {"name": "First task", "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            },
+        ]
+
+        events = schedule_energy_aware(
+            subtasks,
+            free_slots,
+            {"morning": "high", "afternoon": "medium", "evening": "low"},
+            break_minutes=10,
+        )
+
+        assert events[0]["end"] == "2026-04-06T09:30:00+00:00"
+        assert events[1]["start"] == "2026-04-06T09:40:00+00:00"
+
 
 class TestScheduleCandidateNodes:
+    def test_deadline_first_node_passes_break_minutes_to_heuristic(self):
+        state = {
+            "subtasks": [
+                {"name": "First task", "description": "x", "duration_minutes": 30},
+                {"name": "Second task", "description": "y", "duration_minutes": 30},
+            ],
+            "free_slots": [
+                {
+                    "start": "2026-04-06T09:00:00+00:00",
+                    "end": "2026-04-06T11:00:00+00:00",
+                },
+            ],
+            "break_minutes": 10,
+        }
+
+        result = deadline_first_node(state)
+
+        events = result["candidate_deadline_first"]
+        assert events[1]["start"] == "2026-04-06T09:40:00+00:00"
+        assert result["debug_trace"][0]["summary"]["break_minutes"] == 10
+
     def test_energy_aware_trace_includes_energy_and_order_metadata(self):
         state = {
             "subtasks": [
@@ -829,6 +932,47 @@ class TestBuildProposal:
 
 
 class TestLiveCalendarNodeIntegration:
+    def test_fetch_events_uses_configured_app_timezone(self, monkeypatch):
+        state = {
+            "deadline": "2026-05-15",
+            "work_start": "09:00",
+            "work_end": "18:00",
+        }
+        observed: dict[str, Any] = {}
+
+        monkeypatch.setattr("src.orchestration.nodes.fetch_events.settings.CALENDAR_MODE", "mock")
+        monkeypatch.setattr(
+            "src.orchestration.nodes.fetch_events.settings.APP_TIMEZONE",
+            "America/New_York",
+        )
+
+        def _fake_fetch_mock_busy_blocks(time_min, time_max):
+            observed["time_min"] = time_min
+            observed["time_max"] = time_max
+            return []
+
+        def _fake_compute_free_slots(**kwargs):
+            observed["horizon_start"] = kwargs["horizon_start"]
+            observed["horizon_end"] = kwargs["horizon_end"]
+            return []
+
+        monkeypatch.setattr(
+            "src.calendar_api.mock_calendar.fetch_mock_busy_blocks",
+            _fake_fetch_mock_busy_blocks,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.nodes.fetch_events.compute_free_slots",
+            _fake_compute_free_slots,
+        )
+
+        result = fetch_events_node(state)
+
+        assert observed["time_min"].tzinfo.key == "America/New_York"
+        assert observed["time_max"].tzinfo.key == "America/New_York"
+        assert observed["horizon_start"].tzinfo.key == "America/New_York"
+        assert observed["horizon_end"].tzinfo.key == "America/New_York"
+        assert result["debug_trace"][0]["details"]["timezone"] == "America/New_York"
+
     def test_fetch_events_live_uses_configured_calendar_id(self, monkeypatch):
         state = {
             "deadline": "2099-01-01",

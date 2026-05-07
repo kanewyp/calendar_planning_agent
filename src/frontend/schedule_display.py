@@ -20,6 +20,7 @@ from typing import Any
 
 import streamlit as st
 
+from config.settings import settings
 from src.frontend.calendar_events import (
     STRATEGY_COLORS,
     STRATEGY_STATE_KEYS,
@@ -190,6 +191,7 @@ def render_calendar_view(state: AgentState) -> str:
         work_start=work_start,
         work_end=work_end,
         fallback_date_iso=str(fallback_iso),
+        app_timezone=settings.APP_TIMEZONE,
     )
 
     st.iframe(
