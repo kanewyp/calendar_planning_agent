@@ -156,6 +156,10 @@ GENERAL RULES
 - Reflect genuine domain knowledge — no filler.
 - Total estimated time should be achievable before the deadline.
 - The number of subtasks should fit the goal's complexity (don't pad).
+- Return 3-12 subtasks. Prefer fewer, larger-but-still-schedulable tasks over
+  dozens of tiny items.
+- Keep each "description" compact: tags plus one concise sentence, no more than
+  180 characters after the tags.
 - Avoid generic "review progress" tasks unless genuinely needed.
 
 ================================================================
