@@ -37,7 +37,7 @@ STRATEGY_DESCRIPTIONS = {
 
 RATIONALE_PROMPT = """You are explaining one possible schedule to the user.
 
-The user wanted to achieve: {goal}
+Goal: {goal}
 Context: {context}
 
 Strategy: {strategy_name} — {strategy_description}
@@ -48,22 +48,71 @@ User energy profile (for energy-aware interpretation):
 - Afternoon: {energy_afternoon}
 - Evening: {energy_evening}
 
-The goal was broken into these subtasks (with estimated durations):
+Subtask overview:
 {subtasks_summary}
 
-This strategy produced the following scheduled events:
+Schedule overview:
 {schedule_summary}
 
 Violations found: {violation_count} ({violation_summary})
 
-Write 2–3 sentences explaining:
+Write 2 short sentences, maximum 60 words total, explaining:
 1. What tradeoff this strategy makes.
 2. Why this schedule looks the way it does given the user's calendar.
 3. If there are violations, briefly note what they are.
 4. Confirm the schedule still respects dependency/learning flow constraints.
 
-Be concise, specific, and helpful.
+Return plain text only. Be concise, specific, and helpful.
 """
+
+
+def _root_cause(exc: BaseException) -> BaseException:
+    current = exc
+    while current.__cause__ is not None:
+        current = current.__cause__
+    return current
+
+
+def _fallback_rationale(
+    *,
+    strategy_name: str,
+    event_count: int,
+    violation_count: int,
+    violation_summary: str,
+) -> str:
+    violation_sentence = (
+        "No hard-constraint violations were found."
+        if violation_count == 0
+        else f"Validation found {violation_count} issue(s): {violation_summary}."
+    )
+    return (
+        f"{strategy_name} produced {event_count} scheduled event(s) using its "
+        "standard scheduling tradeoff. Review the event order and times against "
+        f"your calendar before approving. {violation_sentence}"
+    )
+
+
+def _compact_subtasks_summary(subtasks: list[dict[str, Any]]) -> str:
+    total_minutes = sum(subtask["duration_minutes"] for subtask in subtasks)
+    first_names = ", ".join(subtask["name"] for subtask in subtasks[:4])
+    if len(subtasks) > 4:
+        first_names = f"{first_names}, ..."
+    return (
+        f"{len(subtasks)} subtasks, {total_minutes} total minutes. "
+        f"Dependency order starts with: {first_names}"
+    )
+
+
+def _compact_schedule_summary(candidate: list[dict[str, str]]) -> str:
+    if not candidate:
+        return "No events scheduled."
+    first = candidate[0]
+    last = candidate[-1]
+    return (
+        f"{len(candidate)} events. First: {first['name']} from {first['start']} "
+        f"to {first['end']}. Last: {last['name']} from {last['start']} "
+        f"to {last['end']}."
+    )
 
 
 def generate_rationales_node(state: AgentState) -> dict[str, Any]:
@@ -103,10 +152,7 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
             f"generate_rationales_node missing required state keys: {sorted(missing)}"
         )
 
-    subtasks_summary = "\n".join(
-        f"- {s['name']} ({s['duration_minutes']} min): {s['description']}"
-        for s in state["subtasks"]
-    )
+    subtasks_summary = _compact_subtasks_summary(state["subtasks"])
 
     strategy_state_keys = {
         "deadline_first": "candidate_deadline_first",
@@ -115,6 +161,10 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
     }
 
     rationales: dict[str, str] = {}
+    rationale_sources: dict[str, str] = {}
+    rationale_failures: dict[str, dict[str, str]] = {}
+    skip_llm_after_failure = False
+
     for strategy_name, state_key in strategy_state_keys.items():
         candidate = state[state_key]
 
@@ -131,13 +181,7 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
             else ", ".join(v["violation_type"] for v in violations)
         )
 
-        schedule_summary = (
-            "(no events scheduled)"
-            if not candidate
-            else "\n".join(
-                f"- {e['name']}: {e['start']} to {e['end']}" for e in candidate
-            )
-        )
+        schedule_summary = _compact_schedule_summary(candidate)
 
         prompt = RATIONALE_PROMPT.format(
             goal=state["goal"],
@@ -155,26 +199,49 @@ def generate_rationales_node(state: AgentState) -> dict[str, Any]:
             violation_summary=violation_summary,
         )
 
-        try:
-            rationales[strategy_name] = call_llm_text(
-                prompt,
-                purpose="rationale",
-            ).strip()
-        except Exception as exc:
-            raise RuntimeError(
-                f"Rationale generation failed for strategy '{strategy_name}'"
-            ) from exc
+        if not skip_llm_after_failure:
+            try:
+                rationales[strategy_name] = call_llm_text(
+                    prompt,
+                    purpose="rationale",
+                ).strip()
+                rationale_sources[strategy_name] = "llm"
+                continue
+            except Exception as exc:
+                root = _root_cause(exc)
+                rationale_failures[strategy_name] = {
+                    "error_type": type(root).__name__,
+                    "error_message": str(root),
+                }
+                skip_llm_after_failure = True
+
+        rationales[strategy_name] = _fallback_rationale(
+            strategy_name=strategy_name,
+            event_count=len(candidate),
+            violation_count=violation_count,
+            violation_summary=violation_summary,
+        )
+        rationale_sources[strategy_name] = "fallback"
 
     trace = make_trace_event(
         "generate_rationales",
         summary={
             **get_llm_metadata("rationale"),
             "rationale_count": len(rationales),
+            "fallback_rationale_count": sum(
+                1 for source in rationale_sources.values() if source == "fallback"
+            ),
         },
         details={
             strategy: {
                 "character_count": len(rationale),
                 "word_count": len(rationale.split()),
+                "source": rationale_sources[strategy],
+                **(
+                    {"failure": rationale_failures[strategy]}
+                    if strategy in rationale_failures
+                    else {}
+                ),
             }
             for strategy, rationale in rationales.items()
         },
