@@ -1,13 +1,9 @@
 # =============================================================================
-# src/frontend/approval_controls.py — Strategy picker + reject button
+# src/frontend/approval_controls.py — Approve / Reject controls
 # =============================================================================
-# Renders per-strategy "Pick this plan" buttons and a "Reject all" button.
-# Returns the user's choice so app.py can resume the graph.
-#
-# STEPS TO COMPLETE:
-# 1. For each strategy, display a "Pick this plan" button.
-# 2. Display a "Reject all" button separately.
-# 3. Return the user's choice.
+# Renders an "Approve" button for the heuristic that the user has selected in
+# the calendar view, plus a "Reject all" button. Returns the user's choice so
+# app.py can resume the graph.
 # =============================================================================
 
 from __future__ import annotations
@@ -16,52 +12,61 @@ import streamlit as st
 
 
 STRATEGY_NAMES = ["deadline_first", "min_fragmentation", "energy_aware"]
-STRATEGY_BUTTON_LABELS = {
-    "deadline_first": "Pick: Finish Earliest",
-    "min_fragmentation": "Pick: Keep Time Contiguous",
-    "energy_aware": "Pick: Energy-Aware",
+STRATEGY_DISPLAY_NAMES = {
+    "deadline_first": "Finish Earliest",
+    "min_fragmentation": "Keep Time Contiguous",
+    "energy_aware": "Energy-Aware",
 }
 
 
-def render_strategy_buttons(candidates_identical: bool = False) -> tuple[str | None, str | None]:
-    """Render strategy selection buttons and return the user's decision.
+def render_strategy_buttons(
+    candidates_identical: bool = False,
+    active_strategy: str | None = None,
+) -> tuple[str | None, str | None]:
+    """Render approval / rejection buttons.
 
     Args:
-        candidates_identical: If True, show a single "Approve" button
-            instead of three strategy buttons (all plans are the same).
+        candidates_identical: If True, the three heuristics produced the same
+            plan and the calendar shows that single plan.
+        active_strategy: The heuristic currently displayed in the calendar
+            view; used as the strategy that gets approved on click. Falls back
+            to "deadline_first" if not provided (e.g. legacy callers).
 
     Returns:
         Tuple of (action, strategy_name):
-        - ("approve", "deadline_first") if user picked a strategy
-          (or approved in collapsed mode)
-        - ("reject", None) if user clicked Reject
+        - ("approve", strategy_name) if user approved
+        - ("reject", None) if user rejected
         - (None, None) if no button pressed yet
-
-    STEPS:
-    1. If candidates_identical:
-       a. Show a single st.button("Approve Schedule", type="primary").
-       b. On click → return ("approve", "deadline_first").
-    2. Otherwise:
-       a. Create three columns with st.columns(3).
-       b. In each column, place a st.button with the strategy label.
-       c. On any click → return ("approve", strategy_name).
-    3. Below the strategy buttons, render a "Reject All" button.
-       On click → return ("reject", None).
-    4. If no button pressed → return (None, None).
     """
-    if candidates_identical:
-        if st.button("Approve Schedule", type="primary", use_container_width=True):
-            return ("approve", "deadline_first")
-    else:
-        strategy_columns = st.columns(3)
-        for strategy_name, column in zip(STRATEGY_NAMES, strategy_columns):
-            label = STRATEGY_BUTTON_LABELS[strategy_name]
-            with column:
-                if st.button(label, type="primary", use_container_width=True):
-                    return ("approve", strategy_name)
+    selected_strategy = active_strategy or "deadline_first"
+    if selected_strategy not in STRATEGY_NAMES:
+        selected_strategy = "deadline_first"
 
     st.divider()
-    if st.button("Reject All", use_container_width=True):
-        return ("reject", None)
+
+    if candidates_identical:
+        approve_label = "Approve schedule"
+    else:
+        display_name = STRATEGY_DISPLAY_NAMES[selected_strategy]
+        approve_label = f"Approve '{display_name}'"
+
+    approve_col, reject_col = st.columns(2)
+
+    with approve_col:
+        if st.button(
+            approve_label,
+            type="primary",
+            use_container_width=True,
+            key="approve_button",
+        ):
+            return ("approve", selected_strategy)
+
+    with reject_col:
+        if st.button(
+            "Reject all",
+            use_container_width=True,
+            key="reject_button",
+        ):
+            return ("reject", None)
 
     return (None, None)
