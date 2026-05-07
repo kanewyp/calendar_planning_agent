@@ -17,7 +17,7 @@ import datetime
 from typing import Any
 
 from src.calendar_api.free_slots import compute_free_slots
-from src.calendar_api.events import create_events_batch, fetch_busy_blocks
+from src.calendar_api.events import create_event, create_events_batch, fetch_busy_blocks
 from src.calendar_api.mock_calendar import create_mock_event, fetch_mock_busy_blocks
 
 
@@ -323,6 +323,42 @@ class TestLiveCalendarEvents:
             },
         ]
 
+    def test_create_event_sets_color_id_when_provided(self, monkeypatch):
+        """create_event should include colorId in the Google insert payload."""
+        observed: dict[str, Any] = {}
+
+        class _EventsInsertCall:
+            def execute(self) -> dict[str, Any]:
+                return {"id": "evt-colored"}
+
+        class _FakeEventsResource:
+            def insert(self, **kwargs):
+                observed.update(kwargs)
+                return _EventsInsertCall()
+
+        class _FakeService:
+            def events(self):
+                return _FakeEventsResource()
+
+        monkeypatch.setattr(
+            "src.calendar_api.events.build_calendar_service",
+            lambda: _FakeService(),
+        )
+
+        response = create_event(
+            summary="Study constraints",
+            description="Read validator code",
+            start=dt(2026, 4, 6, 10),
+            end=dt(2026, 4, 6, 11),
+            calendar_id="learning-calendar@example.com",
+            color_id="10",
+        )
+
+        assert response == {"id": "evt-colored"}
+        assert observed["calendarId"] == "learning-calendar@example.com"
+        assert observed["body"]["summary"] == "Study constraints"
+        assert observed["body"]["colorId"] == "10"
+
     def test_create_events_batch_uses_default_description(self, monkeypatch):
         """create_events_batch should tolerate missing description fields."""
         calls: list[dict[str, Any]] = []
@@ -352,3 +388,4 @@ class TestLiveCalendarEvents:
         assert responses == [{"id": "evt-1"}, {"id": "evt-2"}]
         assert calls[0]["description"] == ""
         assert calls[1]["description"] == "Important"
+        assert calls[0]["color_id"] is None

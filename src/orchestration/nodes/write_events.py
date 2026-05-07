@@ -61,6 +61,7 @@ def write_events_node(state: AgentState) -> dict[str, Any]:
         responses = create_events_batch(
             final_schedule,
             calendar_id=settings.GOOGLE_CALENDAR_ID,
+            color_id=settings.AGENT_EVENT_COLOR_ID,
         )
     else:
         raise ValueError(
@@ -81,6 +82,7 @@ def write_events_node(state: AgentState) -> dict[str, Any]:
                 for event in final_schedule
             ],
             "calendar_id": settings.GOOGLE_CALENDAR_ID,
+            "agent_event_color_id": settings.AGENT_EVENT_COLOR_ID,
         },
     )
 
