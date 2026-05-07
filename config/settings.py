@@ -66,6 +66,7 @@ class Settings:
     # --- Scheduling defaults ---
     DEFAULT_WORK_START: str = os.getenv("DEFAULT_WORK_START", "09:00")
     DEFAULT_WORK_END: str = os.getenv("DEFAULT_WORK_END", "18:00")
+    APP_TIMEZONE: str = os.getenv("APP_TIMEZONE", "America/New_York")
 
     # --- AWS (production only) ---
     AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")

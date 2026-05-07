@@ -84,11 +84,14 @@ class TestBuildCalendarHtml:
             work_start="07:30",
             work_end="22:00",
             fallback_date_iso="2026-05-04",
+            app_timezone="America/New_York",
         )
 
         assert 'var INITIAL_VIEW = "timeGridWeek";' in html
         assert 'var SLOT_MIN = "07:30";' in html
         assert 'var SLOT_MAX = "22:00";' in html
+        assert 'var APP_TIMEZONE = "America/New_York";' in html
+        assert "timeZone: APP_TIMEZONE" in html
 
     def test_explicit_initial_date_overrides_event_derivation(self) -> None:
         events = [

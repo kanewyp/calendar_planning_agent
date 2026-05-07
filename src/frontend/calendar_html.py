@@ -261,11 +261,12 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   var INITIAL_VIEW = "__INITIAL_VIEW__";
   var SLOT_MIN = "__SLOT_MIN__";
   var SLOT_MAX = "__SLOT_MAX__";
+  var APP_TIMEZONE = "__APP_TIMEZONE__";
 
   function fmtTimeRange(start, end) {
     if (!start) return "";
     var s = new Date(start);
-    var opts = { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' };
+    var opts = { hour: 'numeric', minute: '2-digit', timeZone: APP_TIMEZONE };
     var startStr = s.toLocaleTimeString([], opts);
     if (!end) return startStr;
     var e = new Date(end);
@@ -275,7 +276,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   function fmtDate(d) {
     if (!d) return "";
     return new Date(d).toLocaleDateString([], {
-      weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC'
+      weekday: 'long', month: 'long', day: 'numeric', timeZone: APP_TIMEZONE
     });
   }
 
@@ -341,7 +342,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   document.addEventListener('DOMContentLoaded', function() {
     var calEl = document.getElementById('cal');
     var calendar = new FullCalendar.Calendar(calEl, {
-      timeZone: 'UTC',
+      timeZone: APP_TIMEZONE,
       initialView: INITIAL_VIEW,
       initialDate: INITIAL_DATE,
       headerToolbar: {
@@ -415,6 +416,7 @@ def build_calendar_html(
     work_start: str = "08:00",
     work_end: str = "20:00",
     fallback_date_iso: str | None = None,
+    app_timezone: str = "America/New_York",
 ) -> str:
     """Render the full self-contained HTML document for the calendar iframe.
 
@@ -426,6 +428,7 @@ def build_calendar_html(
         work_start, work_end: "HH:MM" strings used as time-grid bounds.
         fallback_date_iso: Used when events is empty and no `initial_date`
             is provided.
+        app_timezone: IANA timezone used by FullCalendar and event popovers.
     """
     resolved_date = initial_date or _initial_calendar_date(events, fallback_date_iso)
     # Escape forward slashes in the JSON payload so a "</script>" substring
@@ -441,4 +444,5 @@ def build_calendar_html(
         .replace("__INITIAL_VIEW__", initial_view)
         .replace("__SLOT_MIN__", str(work_start))
         .replace("__SLOT_MAX__", str(work_end))
+        .replace("__APP_TIMEZONE__", str(app_timezone))
     )
