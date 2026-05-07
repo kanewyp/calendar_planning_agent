@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 
 from src.orchestration.state import Subtask, ProposedEvent
+from src.orchestration.heuristics._breaks import next_allowed_start
 from src.orchestration.heuristics._structural import (
     has_any_structural_tags,
     safe_structural_shuffle,
@@ -22,6 +23,7 @@ from src.orchestration.heuristics._structural import (
 def schedule_deadline_first(
     subtasks: list[Subtask],
     free_slots: list[dict[str, str]],
+    break_minutes: int = 0,
 ) -> list[ProposedEvent]:
     """Schedule subtasks into the earliest available free slots.
 
@@ -31,6 +33,7 @@ def schedule_deadline_first(
                   [shuffle:yes] runs may be locally reordered (longer first)
                   so larger tasks claim earlier viable slots.
         free_slots: Chronologically sorted list of {"start", "end"} dicts.
+        break_minutes: Non-negative buffer between proposed work sessions.
 
     Returns:
         List of ProposedEvent dicts.
@@ -102,7 +105,7 @@ def schedule_deadline_first(
             )
         )
 
-        min_allowed_start = event_end
+        min_allowed_start = next_allowed_start(event_end, break_minutes)
 
         if slot_start < event_start:
             available_slots.append((slot_start, event_start))

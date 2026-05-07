@@ -1,10 +1,10 @@
 # =============================================================================
 # src/frontend/intake_form.py — User intake form
 # =============================================================================
-# Collects five fields from the user and returns them as a structured dict.
+# Collects planning preferences from the user and returns them as a structured dict.
 #
 # STEPS TO COMPLETE:
-# 1. Build the Streamlit form with the five fields listed below.
+# 1. Build the Streamlit form with the fields listed below.
 # 2. On submit, validate that required fields are present.
 # 3. Package the fields into the UserInputs dict and return it.
 # =============================================================================
@@ -25,6 +25,7 @@ class UserInputs(TypedDict):
     work_start: datetime.time       # Preferred working hours — start
     work_end: datetime.time         # Preferred working hours — end
     max_session_minutes: int        # Maximum single-session length
+    break_minutes: int              # Buffer between planned sessions
     energy_levels: dict[str, str]   # {"morning": "high", "afternoon": "medium", "evening": "low"}
 
 
@@ -43,7 +44,9 @@ def render_intake_form() -> UserInputs | None:
           Default to 09:00 and 18:00.
        e. st.number_input for max_session_minutes,
           min=15, max=240, default=90, step=15.
-       f. st.form_submit_button("Plan my schedule").
+       f. st.number_input for break_minutes,
+          min=0, max=60, default=10, step=5.
+       g. st.form_submit_button("Plan my schedule").
     3. On submit, if goal is empty show st.error and return None.
     4. If work_start >= work_end, show st.error and return None.
     5. If deadline <= today, show st.error and return None.
@@ -77,6 +80,13 @@ def render_intake_form() -> UserInputs | None:
             max_value=240,
             value=90,
             step=15,
+        )
+        break_minutes = st.number_input(
+            "Break between sessions (minutes)",
+            min_value=0,
+            max_value=60,
+            value=10,
+            step=5,
         )
         
         st.markdown("**Your energy levels by time of day:**")
@@ -127,6 +137,7 @@ def render_intake_form() -> UserInputs | None:
         work_start=work_start,
         work_end=work_end,
         max_session_minutes=int(max_session_minutes),
+        break_minutes=int(break_minutes),
         energy_levels={
             "morning": morning_energy,
             "afternoon": afternoon_energy,

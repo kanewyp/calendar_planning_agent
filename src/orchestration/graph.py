@@ -219,6 +219,7 @@ def run_graph_until_approval(
            work_start=user_inputs["work_start"].strftime("%H:%M"),
            work_end=user_inputs["work_end"].strftime("%H:%M"),
            max_session_minutes=user_inputs["max_session_minutes"],
+           break_minutes=user_inputs.get("break_minutes", 10),
            selected_strategy=None,
            user_approved=None,
        )
@@ -267,6 +268,7 @@ def run_graph_until_approval(
         "work_start": work_start_value,
         "work_end": work_end_value,
         "max_session_minutes": int(user_inputs["max_session_minutes"]),
+        "break_minutes": int(user_inputs.get("break_minutes", 10)),
         "energy_levels": dict(user_inputs["energy_levels"]),
         "selected_strategy": None,
         "user_approved": None,

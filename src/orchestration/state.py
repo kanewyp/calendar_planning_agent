@@ -69,6 +69,7 @@ class AgentState(TypedDict, total=False):
     work_start: str                             # "HH:MM"
     work_end: str                               # "HH:MM"
     max_session_minutes: int
+    break_minutes: int                          # Buffer between proposed work sessions
     energy_levels: dict[str, str]               # {"morning": "high", "afternoon": "medium", "evening": "low"}
 
     # --- Calendar data (set by fetch_events node) ---

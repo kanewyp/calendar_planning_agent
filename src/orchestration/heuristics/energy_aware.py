@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 
 from src.orchestration.state import Subtask, ProposedEvent
+from src.orchestration.heuristics._breaks import next_allowed_start
 from src.orchestration.heuristics._structural import (
     COMPLEXITY_SCORE,
     complexity_score,
@@ -41,6 +42,7 @@ def schedule_energy_aware(
     free_slots: list[dict[str, str]],
     user_energy_levels: dict[str, str] | None = None,
     work_start: str = "09:00",
+    break_minutes: int = 0,
 ) -> list[ProposedEvent]:
     """Schedule subtasks respecting order while matching user's energy levels.
 
@@ -54,6 +56,7 @@ def schedule_energy_aware(
         user_energy_levels: e.g. {"morning": "high", "afternoon": "medium",
                              "evening": "low"}. Defaults to that mapping.
         work_start: User's working hours start "HH:MM" (kept for API consistency).
+        break_minutes: Non-negative buffer between proposed work sessions.
 
     Returns:
         List of ProposedEvent dicts, sorted chronologically.
@@ -166,7 +169,7 @@ def schedule_energy_aware(
             )
         )
 
-        min_allowed_start = event_end
+        min_allowed_start = next_allowed_start(event_end, break_minutes)
 
         # Return remainders to pool in sorted order so subsequent passes
         # scan slots correctly.
