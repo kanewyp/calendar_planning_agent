@@ -31,6 +31,24 @@ VERTEX_OPENAI_BASE_URL_TEMPLATE = (
 MAX_RETRIES = 2
 
 
+class LLMResponseTruncated(RuntimeError):
+    """Raised when a provider stops because the response hit max_tokens."""
+
+
+def _truncation_message(*, purpose: str, max_tokens: int) -> str:
+    if purpose == "rationale":
+        return (
+            "LLM text response was truncated at max_tokens before it could be "
+            f"completed. Increase LLM_RATIONALE_MAX_TOKENS above {max_tokens} "
+            "or reduce the rationale prompt size."
+        )
+    return (
+        "LLM JSON response was truncated at max_tokens before valid JSON could "
+        f"be completed. Increase LLM_DECOMPOSITION_MAX_TOKENS above {max_tokens} "
+        "or reduce the requested plan size."
+    )
+
+
 def _clean_llm_json(text: str) -> str:
     """Apply small repairs for common model JSON formatting mistakes."""
     text = re.sub(r"```[a-zA-Z]*\n?", "", text).strip("`").strip()
@@ -83,6 +101,8 @@ def _normalize_provider(provider: str | None = None) -> str:
 
 
 def _model_for_purpose(provider: str, purpose: str) -> str:
+    if provider == "mock":
+        return "mock"
     configured_model = (
         settings.LLM_RATIONALE_MODEL
         if purpose == "rationale"
@@ -94,8 +114,6 @@ def _model_for_purpose(provider: str, purpose: str) -> str:
         return GEMINI_DEFAULT_MODEL
     if provider == "anthropic":
         return ANTHROPIC_DEFAULT_MODEL
-    if provider == "mock":
-        return "mock"
     raise ValueError(
         "LLM model is not set. Configure LLM_DECOMPOSITION_MODEL and "
         "LLM_RATIONALE_MODEL, or use "
@@ -110,7 +128,14 @@ def get_llm_metadata(purpose: str) -> dict[str, str]:
         "provider": provider,
         "model": _model_for_purpose(provider, purpose),
         "purpose": purpose,
+        "max_tokens": str(_max_tokens_for_purpose(purpose)),
     }
+
+
+def _max_tokens_for_purpose(purpose: str) -> int:
+    if purpose == "rationale":
+        return settings.LLM_RATIONALE_MAX_TOKENS
+    return settings.LLM_DECOMPOSITION_MAX_TOKENS
 
 
 def _api_key_for_provider(provider: str) -> str:
@@ -172,6 +197,7 @@ def _call_anthropic(
     *,
     model: str,
     api_key: str,
+    purpose: str,
     temperature: float = 0.0,
     max_tokens: int = 4096,
 ) -> str:
@@ -183,6 +209,10 @@ def _call_anthropic(
         temperature=temperature,
         messages=[{"role": "user", "content": prompt}],
     )
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        raise LLMResponseTruncated(
+            _truncation_message(purpose=purpose, max_tokens=max_tokens)
+        )
     return response.content[0].text
 
 
@@ -199,13 +229,24 @@ def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any]) -> An
         raise RuntimeError(f"LLM provider request failed: {exc.reason}") from exc
 
 
-def _extract_openai_compatible_text(response: Any) -> str:
+def _extract_openai_compatible_text(
+    response: Any,
+    *,
+    purpose: str,
+    max_tokens: int,
+) -> str:
     try:
-        content = response["choices"][0]["message"]["content"]
+        choice = response["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError(
             f"LLM provider returned an unexpected response shape: {response!r}"
         ) from exc
+
+    if choice.get("finish_reason") == "length":
+        raise LLMResponseTruncated(
+            _truncation_message(purpose=purpose, max_tokens=max_tokens)
+        )
 
     if isinstance(content, str):
         return content
@@ -225,6 +266,7 @@ def _call_openai_compatible(
     model: str,
     api_key: str,
     base_url: str,
+    purpose: str,
     temperature: float = 0.0,
     max_tokens: int = 4096,
 ) -> str:
@@ -246,7 +288,11 @@ def _call_openai_compatible(
             "max_tokens": max_tokens,
         },
     )
-    return _extract_openai_compatible_text(response)
+    return _extract_openai_compatible_text(
+        response,
+        purpose=purpose,
+        max_tokens=max_tokens,
+    )
 
 
 def _call_mock(prompt: str, *, purpose: str) -> str:
@@ -288,12 +334,14 @@ def _call_llm(
     provider = _normalize_provider()
     model = _model_for_purpose(provider, purpose)
     api_key = _api_key_for_provider(provider)
+    max_tokens = _max_tokens_for_purpose(purpose)
 
     if provider == "anthropic":
         return _call_anthropic(
             prompt,
             model=model,
             api_key=api_key,
+            purpose=purpose,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -303,6 +351,7 @@ def _call_llm(
             model=model,
             api_key=api_key,
             base_url=_base_url_for_provider(provider),
+            purpose=purpose,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -321,7 +370,9 @@ def call_llm_json(
     current_prompt = prompt
     last_error: Exception | None = None
     last_response = ""
+    attempts_made = 0
     for attempt in range(MAX_RETRIES + 1):
+        attempts_made = attempt + 1
         try:
             last_response = _call_llm(
                 current_prompt,
@@ -344,10 +395,13 @@ def call_llm_json(
             )
         except anthropic.APIError as exc:
             last_error = exc
+        except LLMResponseTruncated as exc:
+            last_error = exc
+            break
         except RuntimeError as exc:
             last_error = exc
     raise ValueError(
-        f"Failed to get valid JSON after {MAX_RETRIES + 1} attempts: {last_error}"
+        f"Failed to get valid JSON after {attempts_made} attempts: {last_error}"
     )
 
 
@@ -358,15 +412,19 @@ def call_llm_text(
 ) -> str:
     """Call an LLM for free-form text."""
     last_error: Exception | None = None
+    attempts_made = 0
     for attempt in range(MAX_RETRIES + 1):
+        attempts_made = attempt + 1
         try:
             return _call_llm(
                 prompt,
                 purpose=purpose,
                 temperature=temperature,
             )
+        except LLMResponseTruncated as exc:
+            raise exc
         except (anthropic.APIError, RuntimeError) as exc:
             last_error = exc
     raise RuntimeError(
-        f"LLM call failed after {MAX_RETRIES + 1} attempts: {last_error}"
+        f"LLM call failed after {attempts_made} attempts: {last_error}"
     )
