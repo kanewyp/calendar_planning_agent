@@ -253,6 +253,8 @@ class TestDebugPanel:
                                 "name": "Set up Python",
                                 "period": "morning",
                                 "period_energy_level": "high",
+                                "task_complexity": "low",
+                                "energy_mismatch_score": 2,
                             }
                         ]
                     },
@@ -280,6 +282,8 @@ class TestDebugPanel:
         assert "group=foundations" in report
         assert "period=morning" in report
         assert "energy=high" in report
+        assert "complexity=low" in report
+        assert "mismatch=2" in report
         assert "deadline_first: passed=True violations=0" in report
 
 

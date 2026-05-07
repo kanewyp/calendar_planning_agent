@@ -99,6 +99,10 @@ def _format_named_item(item: dict[str, Any]) -> str:
         tag_parts.append(f"period={item['period']}")
     if item.get("period_energy_level") is not None:
         tag_parts.append(f"energy={item['period_energy_level']}")
+    if item.get("task_complexity") is not None:
+        tag_parts.append(f"complexity={item['task_complexity']}")
+    if item.get("energy_mismatch_score") is not None:
+        tag_parts.append(f"mismatch={item['energy_mismatch_score']}")
 
     if not tag_parts:
         return name
