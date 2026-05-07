@@ -22,6 +22,7 @@ import pytest
 from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.decompose_goal import decompose_goal_node
 from src.orchestration.nodes.fetch_events import fetch_events_node
+from src.orchestration.nodes.generate_rationales import generate_rationales_node
 from src.orchestration.nodes.schedule_candidates import (
     energy_aware_node,
     min_fragmentation_node,
@@ -528,6 +529,107 @@ class TestValidateCandidates:
         for validation in result["candidate_validations"].values():
             assert validation["passed"] is True
             assert validation["violations"] == []
+
+
+class TestGenerateRationales:
+    def test_rationale_failure_falls_back_without_failing_planning(self):
+        candidate = [
+            {
+                "name": "Read React docs",
+                "description": "Official docs",
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            }
+        ]
+        state = {
+            "goal": "Learn React basics",
+            "context": "I know JavaScript.",
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "energy_levels": {
+                "morning": "high",
+                "afternoon": "medium",
+                "evening": "low",
+            },
+            "subtasks": [
+                {
+                    "name": "Read React docs",
+                    "description": "[group:intro] [shuffle:no] [complexity:low] Read docs.",
+                    "duration_minutes": 45,
+                }
+            ],
+            "candidate_deadline_first": candidate,
+            "candidate_min_fragmentation": list(candidate),
+            "candidate_energy_aware": list(candidate),
+            "candidate_validations": {
+                "deadline_first": {"passed": True, "violations": []},
+                "min_fragmentation": {"passed": True, "violations": []},
+                "energy_aware": {"passed": True, "violations": []},
+            },
+        }
+
+        with patch(
+            "src.orchestration.nodes.generate_rationales.call_llm_text",
+            side_effect=RuntimeError("rationale provider unavailable"),
+        ) as call_llm_text:
+            result = generate_rationales_node(state)
+
+        assert set(result["candidate_rationales"]) == {
+            "deadline_first",
+            "min_fragmentation",
+            "energy_aware",
+        }
+        assert call_llm_text.call_count == 1
+        trace = result["debug_trace"][0]
+        assert trace["summary"]["fallback_rationale_count"] == 3
+        assert trace["details"]["deadline_first"]["source"] == "fallback"
+        assert (
+            trace["details"]["deadline_first"]["failure"]["error_message"]
+            == "rationale provider unavailable"
+        )
+
+    def test_rationale_success_records_llm_source(self):
+        candidate = [
+            {
+                "name": "Read React docs",
+                "description": "Official docs",
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            }
+        ]
+        state = {
+            "goal": "Learn React basics",
+            "subtasks": [
+                {
+                    "name": "Read React docs",
+                    "description": "Read docs.",
+                    "duration_minutes": 45,
+                }
+            ],
+            "candidate_deadline_first": candidate,
+            "candidate_min_fragmentation": list(candidate),
+            "candidate_energy_aware": list(candidate),
+            "candidate_validations": {
+                "deadline_first": {"passed": True, "violations": []},
+                "min_fragmentation": {"passed": True, "violations": []},
+                "energy_aware": {"passed": True, "violations": []},
+            },
+        }
+
+        with patch(
+            "src.orchestration.nodes.generate_rationales.call_llm_text",
+            return_value="A concise rationale.",
+        ) as call_llm_text:
+            result = generate_rationales_node(state)
+
+        assert call_llm_text.call_count == 3
+        first_prompt = call_llm_text.call_args_list[0].args[0]
+        assert "Subtask overview:" in first_prompt
+        assert "Schedule overview:" in first_prompt
+        assert "Read docs." not in first_prompt
+        assert result["candidate_rationales"]["deadline_first"] == "A concise rationale."
+        assert result["debug_trace"][0]["summary"]["fallback_rationale_count"] == 0
+        assert result["debug_trace"][0]["details"]["deadline_first"]["source"] == "llm"
 
 
 class TestResumeGraph:
