@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime
 
 from src.orchestration.state import Subtask, ProposedEvent
+from src.orchestration.heuristics._breaks import next_allowed_start
 from src.orchestration.heuristics._structural import (
     has_any_structural_tags,
     safe_structural_shuffle,
@@ -23,6 +24,7 @@ from src.orchestration.heuristics._structural import (
 def schedule_min_fragmentation(
     subtasks: list[Subtask],
     free_slots: list[dict[str, str]],
+    break_minutes: int = 0,
 ) -> list[ProposedEvent]:
     """Schedule subtasks to minimise calendar fragmentation.
 
@@ -32,6 +34,7 @@ def schedule_min_fragmentation(
                   contiguous [shuffle:yes] runs are reordered longest-first so
                   heavy tasks are processed before lighter peers.
         free_slots: Chronologically sorted list of {"start", "end"} dicts.
+        break_minutes: Non-negative buffer between proposed work sessions.
 
     Returns:
         List of ProposedEvent dicts.
@@ -158,7 +161,7 @@ def schedule_min_fragmentation(
             )
         )
 
-        min_allowed_start = event_end
+        min_allowed_start = next_allowed_start(event_end, break_minutes)
 
         if slot_start < event_start:
             slot_pool.append((slot_start, event_start))

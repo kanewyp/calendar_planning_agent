@@ -52,6 +52,7 @@ def _patch_intake_streamlit(
     work_end: datetime.time,
     max_session_minutes: int,
     submitted: bool,
+    break_minutes: int = 10,
 ) -> list[str]:
     """Patch Streamlit calls used by render_intake_form and return captured errors."""
     error_messages: list[str] = []
@@ -68,10 +69,11 @@ def _patch_intake_streamlit(
 
     time_values = iter((work_start, work_end))
     monkeypatch.setattr(intake_form.st, "time_input", lambda *args, **kwargs: next(time_values))
+    number_values = iter((max_session_minutes, break_minutes))
     monkeypatch.setattr(
         intake_form.st,
         "number_input",
-        lambda *args, **kwargs: max_session_minutes,
+        lambda *args, **kwargs: next(number_values),
     )
     energy_values = iter(("high", "medium", "low"))
     monkeypatch.setattr(
@@ -192,6 +194,7 @@ class TestIntakeFormValidation:
         assert result["goal"] == "Learn React basics"
         assert result["context"] == "Some context"
         assert result["max_session_minutes"] == 120
+        assert result["break_minutes"] == 10
         assert result["work_start"] == datetime.time(9, 0)
         assert result["work_end"] == datetime.time(18, 0)
         assert isinstance(result["deadline"], datetime.date)
