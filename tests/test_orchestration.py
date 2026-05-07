@@ -932,6 +932,47 @@ class TestBuildProposal:
 
 
 class TestLiveCalendarNodeIntegration:
+    def test_fetch_events_uses_configured_app_timezone(self, monkeypatch):
+        state = {
+            "deadline": "2026-05-15",
+            "work_start": "09:00",
+            "work_end": "18:00",
+        }
+        observed: dict[str, Any] = {}
+
+        monkeypatch.setattr("src.orchestration.nodes.fetch_events.settings.CALENDAR_MODE", "mock")
+        monkeypatch.setattr(
+            "src.orchestration.nodes.fetch_events.settings.APP_TIMEZONE",
+            "America/New_York",
+        )
+
+        def _fake_fetch_mock_busy_blocks(time_min, time_max):
+            observed["time_min"] = time_min
+            observed["time_max"] = time_max
+            return []
+
+        def _fake_compute_free_slots(**kwargs):
+            observed["horizon_start"] = kwargs["horizon_start"]
+            observed["horizon_end"] = kwargs["horizon_end"]
+            return []
+
+        monkeypatch.setattr(
+            "src.calendar_api.mock_calendar.fetch_mock_busy_blocks",
+            _fake_fetch_mock_busy_blocks,
+        )
+        monkeypatch.setattr(
+            "src.orchestration.nodes.fetch_events.compute_free_slots",
+            _fake_compute_free_slots,
+        )
+
+        result = fetch_events_node(state)
+
+        assert observed["time_min"].tzinfo.key == "America/New_York"
+        assert observed["time_max"].tzinfo.key == "America/New_York"
+        assert observed["horizon_start"].tzinfo.key == "America/New_York"
+        assert observed["horizon_end"].tzinfo.key == "America/New_York"
+        assert result["debug_trace"][0]["details"]["timezone"] == "America/New_York"
+
     def test_fetch_events_live_uses_configured_calendar_id(self, monkeypatch):
         state = {
             "deadline": "2099-01-01",

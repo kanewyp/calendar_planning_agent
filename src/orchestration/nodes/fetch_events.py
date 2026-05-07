@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from config.settings import settings
 from src.calendar_api.free_slots import compute_free_slots
@@ -61,7 +62,13 @@ def fetch_events_node(state: AgentState) -> dict[str, Any]:
    work_start = datetime.time.fromisoformat(work_start_raw)
    work_end = datetime.time.fromisoformat(work_end_raw)
 
-   tz = datetime.timezone.utc
+   try:
+      tz = ZoneInfo(settings.APP_TIMEZONE)
+   except ZoneInfoNotFoundError as exc:
+      raise ValueError(
+         f"fetch_events_node: invalid APP_TIMEZONE {settings.APP_TIMEZONE!r}"
+      ) from exc
+
    time_min = datetime.datetime.now(tz=tz)
    time_max = datetime.datetime.combine(
       deadline_date,
@@ -112,6 +119,7 @@ def fetch_events_node(state: AgentState) -> dict[str, Any]:
          "horizon_end": time_max.isoformat(),
          "work_start": work_start.isoformat(timespec="minutes"),
          "work_end": work_end.isoformat(timespec="minutes"),
+         "timezone": settings.APP_TIMEZONE,
          "calendar_id": settings.GOOGLE_CALENDAR_ID,
       },
    )
