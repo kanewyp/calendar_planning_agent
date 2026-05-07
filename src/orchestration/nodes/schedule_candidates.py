@@ -29,6 +29,7 @@ from src.orchestration.heuristics.deadline_first import schedule_deadline_first
 from src.orchestration.heuristics.minimize_fragmentation import schedule_min_fragmentation
 from src.orchestration.heuristics.energy_aware import schedule_energy_aware
 from src.orchestration.heuristics._structural import (
+    COMPLEXITY_SCORE,
     complexity_score,
     has_any_structural_tags,
     safe_structural_shuffle,
@@ -147,23 +148,39 @@ def _candidate_update(
     summary_extra: dict[str, Any] | None = None,
     schedule_energy_levels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    expected_order = _expected_order_for_strategy(strategy_name, subtasks)
-    order_diagnostics = _order_diagnostics(expected_order, candidate)
+    dependency_order = _dependency_order(subtasks)
+    expected_strategy_order = _expected_order_for_strategy(strategy_name, subtasks)
+    order_diagnostics = _order_diagnostics(expected_strategy_order, candidate)
     summary = {
         "strategy": strategy_name,
         "scheduled_event_count": len(candidate),
         "unscheduled_subtask_count": max(subtask_count - len(candidate), 0),
         "free_slot_count": free_slot_count,
         "subtask_order_before": summarize_subtask_order(subtasks),
-        "expected_dependency_order": summarize_subtask_order(expected_order),
+        "dependency_order": summarize_subtask_order(dependency_order),
+        "expected_dependency_order": summarize_subtask_order(dependency_order),
+        "expected_strategy_order": summarize_subtask_order(expected_strategy_order),
         "scheduled_order": _scheduled_order(candidate),
         "chronological_order": order_diagnostics["chronological_order"],
+        "order_inversion_basis": "expected_strategy_order",
         "order_inversion_count": order_diagnostics["order_inversion_count"],
     }
     if summary_extra:
         summary.update(summary_extra)
 
-    details = summarize_schedule(candidate, energy_levels=schedule_energy_levels)
+    event_metadata = None
+    if schedule_energy_levels is not None:
+        event_metadata = _energy_event_metadata(
+            subtasks,
+            candidate,
+            schedule_energy_levels,
+        )
+
+    details = summarize_schedule(
+        candidate,
+        energy_levels=schedule_energy_levels,
+        event_metadata=event_metadata,
+    )
     details["order_inversions"] = order_diagnostics["order_inversions"]
     details["order_inversion_sample_limit"] = order_diagnostics[
         "order_inversion_sample_limit"
@@ -241,6 +258,13 @@ def _order_diagnostics(
     }
 
 
+def _dependency_order(subtasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return the pure dependency order without strategy-specific sorting."""
+    if not has_any_structural_tags(subtasks):
+        return subtasks
+    return safe_structural_shuffle(subtasks, run_sort_key=lambda _subtask: 0)
+
+
 def _expected_order_for_strategy(
     strategy_name: str,
     subtasks: list[dict[str, Any]],
@@ -265,3 +289,57 @@ def _expected_order_for_strategy(
         )
 
     return subtasks
+
+
+def _energy_event_metadata(
+    subtasks: list[dict[str, Any]],
+    candidate: list[dict[str, Any]],
+    energy_levels: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    subtasks_by_name = {subtask["name"]: subtask for subtask in subtasks}
+    return {
+        event["name"]: _energy_metadata_for_event(
+            event,
+            subtasks_by_name.get(event["name"]),
+            energy_levels,
+        )
+        for event in candidate
+    }
+
+
+def _energy_metadata_for_event(
+    event: dict[str, Any],
+    subtask: dict[str, Any] | None,
+    energy_levels: dict[str, str],
+) -> dict[str, Any]:
+    if subtask is None:
+        return {}
+
+    task_complexity_score = complexity_score(subtask)
+    task_complexity = _label_for_score(task_complexity_score)
+    period = _classify_iso_period(event["start"])
+    period_energy_level = energy_levels.get(period)
+    period_energy_score = COMPLEXITY_SCORE.get(period_energy_level or "", 2)
+    return {
+        "task_complexity": task_complexity,
+        "task_complexity_score": task_complexity_score,
+        "period_energy_score": period_energy_score,
+        "energy_mismatch_score": abs(period_energy_score - task_complexity_score),
+    }
+
+
+def _label_for_score(score: int) -> str:
+    for label, value in COMPLEXITY_SCORE.items():
+        if value == score:
+            return label
+    return "medium"
+
+
+def _classify_iso_period(value: str) -> str:
+    start = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    time_value = start.time()
+    if time_value < datetime.time(12, 0):
+        return "morning"
+    if time_value < datetime.time(17, 0):
+        return "afternoon"
+    return "evening"

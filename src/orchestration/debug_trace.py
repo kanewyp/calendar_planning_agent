@@ -55,12 +55,24 @@ def summarize_schedule(
     schedule: list[ProposedEvent],
     *,
     energy_levels: dict[str, str] | None = None,
+    event_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "event_count": len(schedule),
-        "first_event": _summarize_event(schedule[0], energy_levels) if schedule else None,
-        "last_event": _summarize_event(schedule[-1], energy_levels) if schedule else None,
-        "events": [_summarize_event(event, energy_levels) for event in schedule],
+        "first_event": (
+            _summarize_event(schedule[0], energy_levels, event_metadata)
+            if schedule
+            else None
+        ),
+        "last_event": (
+            _summarize_event(schedule[-1], energy_levels, event_metadata)
+            if schedule
+            else None
+        ),
+        "events": [
+            _summarize_event(event, energy_levels, event_metadata)
+            for event in schedule
+        ],
     }
 
 
@@ -127,6 +139,7 @@ def _parse_bool(value: str | None) -> bool | None:
 def _summarize_event(
     event: ProposedEvent,
     energy_levels: dict[str, str] | None = None,
+    event_metadata: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     period = _classify_iso_period(event["start"])
     summary = {
@@ -137,6 +150,8 @@ def _summarize_event(
     }
     if energy_levels is not None:
         summary["period_energy_level"] = energy_levels.get(period)
+    if event_metadata is not None:
+        summary.update(event_metadata.get(event["name"], {}))
     return summary
 
 

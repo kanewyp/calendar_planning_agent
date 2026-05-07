@@ -27,7 +27,7 @@ Current command:
 Current result:
 
 ```text
-62 passed
+81 passed
 ```
 
 The previous no-op `pass # TODO` tests in `tests/test_validator.py`,
@@ -51,6 +51,9 @@ assertive unit tests.
   scheduled event time-of-day periods.
 - Verify Gemini API or another API-key-based low-cost provider only if policy allows API keys.
 - Verify live Google Calendar mode with real OAuth credentials, or explicitly defer it.
+- One-off shell overrides now take precedence over `.env`, so commands like
+  `CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py` work even
+  when `.env` is configured for a live provider.
 
 ## Debug Trace
 
@@ -66,6 +69,22 @@ Current behavior:
   period metadata.
 - Streamlit review/done pages expose a "Debug trace" expander with a compact report and raw JSON.
 - Full prompt/response bodies are not stored by default.
+- LLM metadata now records the configured token budget. Decomposition defaults
+  to `LLM_DECOMPOSITION_MAX_TOKENS=8192`, while rationale generation defaults
+  to `LLM_RATIONALE_MAX_TOKENS=2048`.
+- Provider responses that end because of `max_tokens`/`finish_reason=length`
+  now fail with an explicit truncation message instead of surfacing only a
+  downstream JSON parse error.
+- Rationale generation now falls back to deterministic local explanations if
+  the rationale LLM call fails. The debug trace records fallback counts and the
+  first root-cause error so planning can still reach approval.
+- Rationale prompts use compact schedule/subtask summaries. Provider
+  `max_tokens` truncation is treated as non-retryable for rationale text, so a
+  fallback is produced immediately instead of waiting through three failed
+  attempts.
+- Schedule traces now distinguish pure `dependency_order` from
+  strategy-adjusted `expected_strategy_order`. Energy-aware event traces include
+  task complexity, period energy score, and energy mismatch score.
 
 ## LLM Providers
 
