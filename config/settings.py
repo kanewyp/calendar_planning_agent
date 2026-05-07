@@ -18,9 +18,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load .env from project root (two levels up from this file).
-# override=True ensures .env always wins over stale shell exports.
+# Shell exports intentionally win so one-off commands like
+# `LLM_PROVIDER=mock streamlit run src/app.py` work even when .env is configured
+# for a live provider.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_PROJECT_ROOT / ".env", override=True)
+load_dotenv(_PROJECT_ROOT / ".env", override=False)
 
 
 class Settings:
@@ -38,6 +40,12 @@ class Settings:
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "")
     LLM_DECOMPOSITION_MODEL: str = os.getenv("LLM_DECOMPOSITION_MODEL", "")
     LLM_RATIONALE_MODEL: str = os.getenv("LLM_RATIONALE_MODEL", "")
+    LLM_DECOMPOSITION_MAX_TOKENS: int = int(
+        os.getenv("LLM_DECOMPOSITION_MAX_TOKENS", "8192")
+    )
+    LLM_RATIONALE_MAX_TOKENS: int = int(
+        os.getenv("LLM_RATIONALE_MAX_TOKENS", "2048")
+    )
     VERTEX_PROJECT_ID: str = os.getenv("VERTEX_PROJECT_ID", "")
     VERTEX_LOCATION: str = os.getenv("VERTEX_LOCATION", "global")
 
