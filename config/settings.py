@@ -58,6 +58,7 @@ class Settings:
         "GOOGLE_CLIENT_SECRET_FILE", "credentials.json"
     )
     GOOGLE_CALENDAR_ID: str = os.getenv("GOOGLE_CALENDAR_ID", "primary")
+    AGENT_EVENT_COLOR_ID: str = os.getenv("AGENT_EVENT_COLOR_ID", "10").strip()
 
     # "mock" → use src/calendar_api/mock_calendar.py
     # "live" → use real Google Calendar OAuth

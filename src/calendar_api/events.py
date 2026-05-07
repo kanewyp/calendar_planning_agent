@@ -128,6 +128,7 @@ def create_event(
     start: datetime.datetime,
     end: datetime.datetime,
     calendar_id: str = "primary",
+    color_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a single event on the user's Google Calendar.
 
@@ -140,6 +141,7 @@ def create_event(
         start: Event start datetime, timezone-aware.
         end: Event end datetime, timezone-aware.
         calendar_id: Google Calendar ID, default "primary".
+        color_id: Optional Google Calendar event color ID.
 
     Returns:
         The Google Calendar API response dict for the created event.
@@ -166,12 +168,16 @@ def create_event(
         "start": {"dateTime": start.isoformat()},
         "end": {"dateTime": end.isoformat()},
     }
+    if color_id:
+        event_body["colorId"] = str(color_id)
+
     return service.events().insert(calendarId=calendar_id, body=event_body).execute()
 
 
 def create_events_batch(
     events: list[dict[str, Any]],
     calendar_id: str = "primary",
+    color_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Write multiple events to the calendar sequentially.
 
@@ -179,6 +185,7 @@ def create_events_batch(
         events: List of event dicts, each with keys:
             name, description, start (ISO str), end (ISO str).
         calendar_id: Google Calendar ID.
+        color_id: Optional Google Calendar event color ID applied to each event.
 
     Returns:
         List of Google Calendar API response dicts.
@@ -200,6 +207,7 @@ def create_events_batch(
             start=start_dt,
             end=end_dt,
             calendar_id=calendar_id,
+            color_id=color_id,
         )
         responses.append(response)
     return responses
