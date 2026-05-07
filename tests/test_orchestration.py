@@ -1024,9 +1024,14 @@ class TestLiveCalendarNodeIntegration:
             "src.orchestration.nodes.write_events.settings.GOOGLE_CALENDAR_ID",
             "learning-calendar@example.com",
         )
+        monkeypatch.setattr(
+            "src.orchestration.nodes.write_events.settings.AGENT_EVENT_COLOR_ID",
+            "10",
+        )
 
-        def _fake_create_events_batch(events, calendar_id):
+        def _fake_create_events_batch(events, calendar_id, color_id=None):
             observed["calendar_id"] = calendar_id
+            observed["color_id"] = color_id
             return [{"id": "evt-123"}]
 
         monkeypatch.setattr(
@@ -1037,4 +1042,5 @@ class TestLiveCalendarNodeIntegration:
         result = write_events_node(state)
 
         assert observed["calendar_id"] == "learning-calendar@example.com"
+        assert observed["color_id"] == "10"
         assert result["write_results"] == [{"id": "evt-123"}]
