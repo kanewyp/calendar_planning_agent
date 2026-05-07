@@ -379,11 +379,18 @@ class TestScheduleCandidateNodes:
         assert trace["summary"]["energy_levels"] == state["energy_levels"]
         assert trace["summary"]["structural_mode"] is True
         assert trace["summary"]["subtask_order_before"] == ["Deep work"]
+        assert trace["summary"]["dependency_order"] == ["Deep work"]
+        assert trace["summary"]["expected_strategy_order"] == ["Deep work"]
         assert trace["summary"]["scheduled_order"] == ["Deep work"]
         assert trace["summary"]["chronological_order"] == ["Deep work"]
+        assert trace["summary"]["order_inversion_basis"] == "expected_strategy_order"
         assert trace["summary"]["order_inversion_count"] == 0
         assert trace["details"]["events"][0]["period"] == "morning"
         assert trace["details"]["events"][0]["period_energy_level"] == "low"
+        assert trace["details"]["events"][0]["task_complexity"] == "high"
+        assert trace["details"]["events"][0]["task_complexity_score"] == 3
+        assert trace["details"]["events"][0]["period_energy_score"] == 1
+        assert trace["details"]["events"][0]["energy_mismatch_score"] == 2
         assert trace["details"]["order_inversions"] == []
 
     def test_schedule_trace_uses_phase_order_for_inversion_checks(self):
@@ -426,6 +433,16 @@ class TestScheduleCandidateNodes:
             "A2",
             "B1",
         ]
+        assert trace["summary"]["dependency_order"] == [
+            "A1",
+            "A2",
+            "B1",
+        ]
+        assert trace["summary"]["expected_strategy_order"] == [
+            "A1",
+            "A2",
+            "B1",
+        ]
         assert trace["summary"]["chronological_order"] == [
             "A1",
             "A2",
@@ -433,6 +450,35 @@ class TestScheduleCandidateNodes:
         ]
         assert trace["summary"]["order_inversion_count"] == 0
         assert trace["details"]["order_inversions"] == []
+
+    def test_trace_distinguishes_dependency_order_from_strategy_order(self):
+        state = {
+            "subtasks": [
+                {
+                    "name": "Short peer",
+                    "description": "[group:practice] [shuffle:yes] [complexity:low] Short task.",
+                    "duration_minutes": 30,
+                },
+                {
+                    "name": "Long peer",
+                    "description": "[group:practice] [shuffle:yes] [complexity:high] Long task.",
+                    "duration_minutes": 90,
+                },
+            ],
+            "free_slots": [
+                {
+                    "start": "2026-04-06T09:00:00+00:00",
+                    "end": "2026-04-06T12:00:00+00:00",
+                },
+            ],
+        }
+
+        result = min_fragmentation_node(state)
+
+        trace = result["debug_trace"][0]
+        assert trace["summary"]["dependency_order"] == ["Short peer", "Long peer"]
+        assert trace["summary"]["expected_strategy_order"] == ["Long peer", "Short peer"]
+        assert trace["summary"]["scheduled_order"] == ["Long peer", "Short peer"]
 
 
 class TestValidateCandidates:
