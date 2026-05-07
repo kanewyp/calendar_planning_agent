@@ -7,7 +7,7 @@
 # All three branches run in parallel (or sequentially, then scored together).
 #
 # READS FROM STATE:  subtasks, free_slots, work_start, work_end,
-#                     max_session_minutes
+#                     max_session_minutes, break_minutes
 # WRITES TO STATE:   candidate_deadline_first | candidate_min_fragmentation |
 #                     candidate_energy_aware
 # =============================================================================
@@ -46,13 +46,18 @@ def deadline_first_node(state: AgentState) -> dict[str, Any]:
     """
     subtasks = state.get("subtasks")
     free_slots = state.get("free_slots")
+    break_minutes = _break_minutes_from_state(state)
 
     if not isinstance(subtasks, list) or not isinstance(free_slots, list):
         raise ValueError(
             "deadline_first_node: missing subtasks/free_slots list in state"
         )
 
-    candidate = schedule_deadline_first(subtasks, free_slots)
+    candidate = schedule_deadline_first(
+        subtasks,
+        free_slots,
+        break_minutes=break_minutes,
+    )
     return _candidate_update(
         "deadline_first",
         "candidate_deadline_first",
@@ -61,6 +66,7 @@ def deadline_first_node(state: AgentState) -> dict[str, Any]:
         subtask_count=len(subtasks),
         free_slot_count=len(free_slots),
         summary_extra={
+            "break_minutes": break_minutes,
         },
     )
 
@@ -75,13 +81,18 @@ def min_fragmentation_node(state: AgentState) -> dict[str, Any]:
     """
     subtasks = state.get("subtasks")
     free_slots = state.get("free_slots")
+    break_minutes = _break_minutes_from_state(state)
 
     if not isinstance(subtasks, list) or not isinstance(free_slots, list):
         raise ValueError(
             "min_fragmentation_node: missing subtasks/free_slots list in state"
         )
 
-    candidate = schedule_min_fragmentation(subtasks, free_slots)
+    candidate = schedule_min_fragmentation(
+        subtasks,
+        free_slots,
+        break_minutes=break_minutes,
+    )
     return _candidate_update(
         "min_fragmentation",
         "candidate_min_fragmentation",
@@ -90,6 +101,7 @@ def min_fragmentation_node(state: AgentState) -> dict[str, Any]:
         subtask_count=len(subtasks),
         free_slot_count=len(free_slots),
         summary_extra={
+            "break_minutes": break_minutes,
             "structural_mode": has_structural_tags(subtasks),
         },
     )
@@ -107,6 +119,7 @@ def energy_aware_node(state: AgentState) -> dict[str, Any]:
     free_slots = state.get("free_slots")
     work_start_raw = state.get("work_start")
     energy_levels = state.get("energy_levels")
+    break_minutes = _break_minutes_from_state(state)
 
     if not isinstance(subtasks, list) or not isinstance(free_slots, list):
         raise ValueError("energy_aware_node: missing subtasks/free_slots list in state")
@@ -121,6 +134,7 @@ def energy_aware_node(state: AgentState) -> dict[str, Any]:
         free_slots,
         user_energy_levels=energy_levels,
         work_start=work_start_raw,
+        break_minutes=break_minutes,
     )
     return _candidate_update(
         "energy_aware",
@@ -130,11 +144,16 @@ def energy_aware_node(state: AgentState) -> dict[str, Any]:
         subtask_count=len(subtasks),
         free_slot_count=len(free_slots),
         summary_extra={
+            "break_minutes": break_minutes,
             "energy_levels": energy_levels if isinstance(energy_levels, dict) else None,
             "structural_mode": has_structural_tags(subtasks),
         },
         schedule_energy_levels=energy_levels if isinstance(energy_levels, dict) else None,
     )
+
+
+def _break_minutes_from_state(state: AgentState) -> int:
+    return max(int(state.get("break_minutes", 0) or 0), 0)
 
 
 def _candidate_update(

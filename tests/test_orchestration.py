@@ -24,6 +24,7 @@ from src.orchestration.nodes.decompose_goal import decompose_goal_node
 from src.orchestration.nodes.fetch_events import fetch_events_node
 from src.orchestration.nodes.generate_rationales import generate_rationales_node
 from src.orchestration.nodes.schedule_candidates import (
+    deadline_first_node,
     energy_aware_node,
     min_fragmentation_node,
 )
@@ -219,6 +220,48 @@ class TestDeadlineFirstHeuristic:
         assert events[1]["start"] == "2026-04-06T10:30:00+00:00"
         assert events[1]["end"]   == "2026-04-06T11:00:00+00:00"
 
+    def test_break_minutes_adds_buffer_between_tasks(self):
+        subtasks = [
+            {"name": "First task", "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            },
+        ]
+
+        events = schedule_deadline_first(subtasks, free_slots, break_minutes=10)
+
+        assert events[0]["start"] == "2026-04-06T09:00:00+00:00"
+        assert events[0]["end"] == "2026-04-06T09:30:00+00:00"
+        assert events[1]["start"] == "2026-04-06T09:40:00+00:00"
+        assert events[1]["end"] == "2026-04-06T10:10:00+00:00"
+
+    def test_break_minutes_can_push_next_task_to_next_slot(self):
+        subtasks = [
+            {"name": "First task", "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T09:30:00+00:00",
+            },
+            {
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T10:30:00+00:00",
+            },
+        ]
+
+        events = schedule_deadline_first(subtasks, free_slots, break_minutes=15)
+
+        assert [event["start"] for event in events] == [
+            "2026-04-06T09:00:00+00:00",
+            "2026-04-06T10:00:00+00:00",
+        ]
+
 
 class TestMinFragmentationHeuristic:
     """Test the minimize-fragmentation scheduling strategy."""
@@ -286,6 +329,23 @@ class TestMinFragmentationHeuristic:
 
         assert [event["name"] for event in events] == ["A1", "A2", "B1"]
 
+    def test_break_minutes_adds_buffer_between_tasks(self):
+        subtasks = [
+            {"name": "First task", "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            },
+        ]
+
+        events = schedule_min_fragmentation(subtasks, free_slots, break_minutes=10)
+
+        assert events[0]["end"] == "2026-04-06T09:30:00+00:00"
+        assert events[1]["start"] == "2026-04-06T09:40:00+00:00"
+
 
 class TestEnergyAwareHeuristic:
     """Test the energy-aware scheduling strategy."""
@@ -344,8 +404,51 @@ class TestEnergyAwareHeuristic:
 
         assert events[0]["start"] == "2026-04-06T17:00:00+00:00"
 
+    def test_break_minutes_adds_buffer_between_tasks(self):
+        subtasks = [
+            {"name": "First task", "description": "x", "duration_minutes": 30},
+            {"name": "Second task", "description": "y", "duration_minutes": 30},
+        ]
+        free_slots = [
+            {
+                "start": "2026-04-06T09:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            },
+        ]
+
+        events = schedule_energy_aware(
+            subtasks,
+            free_slots,
+            {"morning": "high", "afternoon": "medium", "evening": "low"},
+            break_minutes=10,
+        )
+
+        assert events[0]["end"] == "2026-04-06T09:30:00+00:00"
+        assert events[1]["start"] == "2026-04-06T09:40:00+00:00"
+
 
 class TestScheduleCandidateNodes:
+    def test_deadline_first_node_passes_break_minutes_to_heuristic(self):
+        state = {
+            "subtasks": [
+                {"name": "First task", "description": "x", "duration_minutes": 30},
+                {"name": "Second task", "description": "y", "duration_minutes": 30},
+            ],
+            "free_slots": [
+                {
+                    "start": "2026-04-06T09:00:00+00:00",
+                    "end": "2026-04-06T11:00:00+00:00",
+                },
+            ],
+            "break_minutes": 10,
+        }
+
+        result = deadline_first_node(state)
+
+        events = result["candidate_deadline_first"]
+        assert events[1]["start"] == "2026-04-06T09:40:00+00:00"
+        assert result["debug_trace"][0]["summary"]["break_minutes"] == 10
+
     def test_energy_aware_trace_includes_energy_and_order_metadata(self):
         state = {
             "subtasks": [
