@@ -23,10 +23,10 @@ import streamlit as st
 from config.settings import settings
 from src.frontend.calendar_events import (
     STRATEGY_COLORS,
-    STRATEGY_STATE_KEYS,
     build_calendar_events,
 )
 from src.frontend.calendar_html import build_calendar_html
+from src.frontend.task_breakdown import render_task_breakdown
 from src.orchestration.state import AgentState, ValidationResult
 
 
@@ -179,6 +179,7 @@ def render_calendar_view(state: AgentState) -> str:
 
     active_strategy, initial_view = _render_header(state)
     _render_strategy_summary(state, active_strategy)
+    render_task_breakdown(state, active_strategy)
 
     events = build_calendar_events(state, active_strategy)
     work_start = str(state.get("work_start") or "08:00")

@@ -25,6 +25,7 @@ from src.frontend import approval_controls
 from src.frontend import debug_panel
 from src.frontend import intake_form
 from src.frontend import schedule_display
+from src.frontend import task_breakdown
 
 
 @contextmanager
@@ -219,6 +220,101 @@ class TestScheduleDisplay:
         assert days[1].isoformat() == "2026-04-07"
         assert len(grouped[days[0]]) == 2
         assert len(grouped[days[1]]) == 1
+
+
+
+class TestTaskBreakdown:
+    def test_build_rows_strips_tags_and_adds_schedule_time(self):
+        state = {
+            "subtasks": [
+                {
+                    "name": "Environment Setup",
+                    "description": (
+                        "[group:setup] [shuffle:no] [complexity:low] "
+                        "Install dependencies and open the starter notebook."
+                    ),
+                    "duration_minutes": 30,
+                },
+                {
+                    "name": "Mini Project",
+                    "description": (
+                        "[group:capstone] [shuffle:no] [complexity:high] "
+                        "Analyze the sample CSV and summarize findings."
+                    ),
+                    "duration_minutes": 120,
+                },
+            ],
+            "candidate_energy_aware": [
+                {
+                    "name": "Environment Setup",
+                    "description": "Install dependencies",
+                    "start": "2026-04-06T10:00:00+00:00",
+                    "end": "2026-04-06T10:30:00+00:00",
+                }
+            ],
+        }
+
+        rows = task_breakdown.build_task_breakdown_rows(state, "energy_aware")
+
+        assert rows == [
+            {
+                "#": 1,
+                "Task": "Environment Setup",
+                "Description": "Install dependencies and open the starter notebook.",
+                "Duration": "30 min",
+                "Complexity": "low",
+                "Phase": "setup",
+                "Scheduled": "Mon Apr 6, 10:00-10:30",
+            },
+            {
+                "#": 2,
+                "Task": "Mini Project",
+                "Description": "Analyze the sample CSV and summarize findings.",
+                "Duration": "120 min",
+                "Complexity": "high",
+                "Phase": "capstone",
+                "Scheduled": "Not scheduled",
+            },
+        ]
+
+    def test_duplicate_task_names_match_schedule_occurrences_in_order(self):
+        state = {
+            "subtasks": [
+                {
+                    "name": "Practice",
+                    "description": "[group:a] [complexity:medium] First pass.",
+                    "duration_minutes": 45,
+                },
+                {
+                    "name": "Practice",
+                    "description": "[group:a] [complexity:medium] Second pass.",
+                    "duration_minutes": 45,
+                },
+            ],
+            "candidate_deadline_first": [
+                {
+                    "name": "Practice",
+                    "description": "First pass",
+                    "start": "2026-04-06T09:00:00+00:00",
+                    "end": "2026-04-06T09:45:00+00:00",
+                },
+                {
+                    "name": "Practice",
+                    "description": "Second pass",
+                    "start": "2026-04-06T10:00:00+00:00",
+                    "end": "2026-04-06T10:45:00+00:00",
+                },
+            ],
+        }
+
+        rows = task_breakdown.build_task_breakdown_rows(state, "deadline_first")
+
+        assert rows[0]["Scheduled"] == "Mon Apr 6, 09:00-09:45"
+        assert rows[1]["Scheduled"] == "Mon Apr 6, 10:00-10:45"
+
+    def test_unknown_strategy_raises(self):
+        with pytest.raises(ValueError, match="Unknown strategy"):
+            task_breakdown.build_task_breakdown_rows({}, "not_a_strategy")
 
 
 class TestDebugPanel:
