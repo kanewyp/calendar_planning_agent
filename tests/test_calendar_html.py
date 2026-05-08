@@ -92,6 +92,26 @@ class TestBuildCalendarHtml:
         assert 'var SLOT_MAX = "22:00";' in html
         assert 'var APP_TIMEZONE = "America/New_York";' in html
         assert "timeZone: APP_TIMEZONE" in html
+        assert "props.rawStart = event.start;" in html
+        assert "props.rawEnd = event.end;" in html
+
+    def test_event_popover_uses_raw_event_times(self) -> None:
+        html = build_calendar_html(
+            [
+                _proposed_event(
+                    "2026-05-14T10:00:00-04:00",
+                    "2026-05-14T11:30:00-04:00",
+                    title="Functions and Scope",
+                )
+            ],
+            app_timezone="America/New_York",
+        )
+
+        assert "fmtDate(props.rawStart || ev.startStr || ev.start)" in html
+        assert (
+            "fmtTimeRange(props.rawStart || ev.startStr || ev.start, "
+            "props.rawEnd || ev.endStr || ev.end)"
+        ) in html
 
     def test_explicit_initial_date_overrides_event_derivation(self) -> None:
         events = [

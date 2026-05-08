@@ -263,6 +263,15 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   var SLOT_MAX = "__SLOT_MAX__";
   var APP_TIMEZONE = "__APP_TIMEZONE__";
 
+  EVENTS = EVENTS.map(function(event) {
+    var copy = Object.assign({}, event);
+    var props = Object.assign({}, copy.extendedProps || {});
+    props.rawStart = event.start;
+    props.rawEnd = event.end;
+    copy.extendedProps = props;
+    return copy;
+  });
+
   function fmtTimeRange(start, end) {
     if (!start) return "";
     var s = new Date(start);
@@ -315,8 +324,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
       + '<span class="gc-card-dot" style="background:' + escapeHtml(color) + '"></span>'
       + escapeHtml(ev.title || 'Untitled')
       + '</div>'
-      + '<div class="gc-card-row">' + escapeHtml(fmtDate(ev.start)) + '</div>'
-      + '<div class="gc-card-row">' + escapeHtml(fmtTimeRange(ev.start, ev.end)) + '</div>'
+      + '<div class="gc-card-row">' + escapeHtml(fmtDate(props.rawStart || ev.startStr || ev.start)) + '</div>'
+      + '<div class="gc-card-row">' + escapeHtml(fmtTimeRange(props.rawStart || ev.startStr || ev.start, props.rawEnd || ev.endStr || ev.end)) + '</div>'
       + '<div class="gc-card-row"><strong>' + escapeHtml(kindLabel) + '</strong></div>'
       + (strategyLabel ? '<div class="gc-card-row">' + escapeHtml(strategyLabel) + '</div>' : '')
       + (props.description ? '<div class="gc-card-description">' + escapeHtml(props.description) + '</div>' : '')
