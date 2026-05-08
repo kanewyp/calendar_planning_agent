@@ -38,6 +38,7 @@ STRATEGY_LABELS: dict[str, tuple[str, str]] = {
 
 ACTIVE_STRATEGY_KEY = "active_strategy_view"
 ACTIVE_VIEW_KEY = "active_calendar_view"
+VIEW_RADIO_KEY = "calendar_view_radio"
 
 _VIEW_OPTIONS: dict[str, str] = {
     "Month": "dayGridMonth",
@@ -90,6 +91,17 @@ def _resolve_active_strategy(state: AgentState) -> str:
     return current
 
 
+def _resolve_active_view_label() -> str:
+    current = st.session_state.get(VIEW_RADIO_KEY)
+    if current not in _VIEW_OPTIONS:
+        current = st.session_state.get(ACTIVE_VIEW_KEY, "Month")
+    if current not in _VIEW_OPTIONS:
+        current = "Month"
+
+    st.session_state[ACTIVE_VIEW_KEY] = current
+    return current
+
+
 def _render_header(state: AgentState) -> tuple[str, str]:
     """Render the heuristic + view picker row and return (strategy, view)."""
     strategy_keys = list(STRATEGY_LABELS.keys())
@@ -105,15 +117,14 @@ def _render_header(state: AgentState) -> tuple[str, str]:
         )
 
     with view_col:
+        current_view = _resolve_active_view_label()
         view_label = st.radio(
             "View",
             list(_VIEW_OPTIONS.keys()),
-            index=list(_VIEW_OPTIONS.keys()).index(
-                st.session_state.get(ACTIVE_VIEW_KEY, "Month")
-            ),
+            index=list(_VIEW_OPTIONS.keys()).index(current_view),
             horizontal=True,
             label_visibility="collapsed",
-            key="calendar_view_radio",
+            key=VIEW_RADIO_KEY,
         )
     st.session_state[ACTIVE_VIEW_KEY] = view_label
     initial_view = _VIEW_OPTIONS[view_label]

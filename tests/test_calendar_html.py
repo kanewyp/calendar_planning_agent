@@ -92,8 +92,16 @@ class TestBuildCalendarHtml:
         assert 'var SLOT_MAX = "22:00";' in html
         assert 'var APP_TIMEZONE = "America/New_York";' in html
         assert "timeZone: APP_TIMEZONE" in html
+        assert "right: 'dayGridMonth,timeGridWeek,timeGridDay'" in html
         assert "props.rawStart = event.start;" in html
         assert "props.rawEnd = event.end;" in html
+
+    def test_fullcalendar_view_buttons_persist_across_rerenders(self) -> None:
+        html = build_calendar_html([], fallback_date_iso="2026-05-04")
+
+        assert 'var VIEW_STORAGE_KEY = "calendar_planning_agent_fullcalendar_view";' in html
+        assert "initialView: getStoredView()" in html
+        assert "storeView(info.view.type)" in html
 
     def test_event_popover_uses_raw_event_times(self) -> None:
         html = build_calendar_html(

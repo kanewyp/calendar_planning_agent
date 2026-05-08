@@ -262,6 +262,23 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   var SLOT_MIN = "__SLOT_MIN__";
   var SLOT_MAX = "__SLOT_MAX__";
   var APP_TIMEZONE = "__APP_TIMEZONE__";
+  var VIEW_STORAGE_KEY = "calendar_planning_agent_fullcalendar_view";
+  var VALID_VIEWS = ["dayGridMonth", "timeGridWeek", "timeGridDay"];
+
+  function getStoredView() {
+    try {
+      var stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
+      if (VALID_VIEWS.indexOf(stored) !== -1) return stored;
+    } catch (e) {}
+    return INITIAL_VIEW;
+  }
+
+  function storeView(viewType) {
+    if (VALID_VIEWS.indexOf(viewType) === -1) return;
+    try {
+      window.localStorage.setItem(VIEW_STORAGE_KEY, viewType);
+    } catch (e) {}
+  }
 
   EVENTS = EVENTS.map(function(event) {
     var copy = Object.assign({}, event);
@@ -352,7 +369,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     var calEl = document.getElementById('cal');
     var calendar = new FullCalendar.Calendar(calEl, {
       timeZone: APP_TIMEZONE,
-      initialView: INITIAL_VIEW,
+      initialView: getStoredView(),
       initialDate: INITIAL_DATE,
       headerToolbar: {
         left: 'prev,next today',
@@ -388,7 +405,10 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
         info.jsEvent.preventDefault();
         showEventCard(info);
       },
-      datesSet: clearCard,
+      datesSet: function(info) {
+        clearCard();
+        storeView(info.view.type);
+      },
     });
     calendar.render();
   });

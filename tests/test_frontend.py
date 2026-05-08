@@ -221,6 +221,41 @@ class TestScheduleDisplay:
         assert len(grouped[days[0]]) == 2
         assert len(grouped[days[1]]) == 1
 
+    def test_resolve_active_view_prefers_radio_state(self, monkeypatch):
+        monkeypatch.setitem(
+            schedule_display.st.session_state,
+            schedule_display.ACTIVE_VIEW_KEY,
+            "Month",
+        )
+        monkeypatch.setitem(
+            schedule_display.st.session_state,
+            schedule_display.VIEW_RADIO_KEY,
+            "Week",
+        )
+
+        assert schedule_display._resolve_active_view_label() == "Week"
+        assert (
+            schedule_display.st.session_state[schedule_display.ACTIVE_VIEW_KEY]
+            == "Week"
+        )
+
+    def test_resolve_active_view_falls_back_to_month(self, monkeypatch):
+        monkeypatch.setitem(
+            schedule_display.st.session_state,
+            schedule_display.ACTIVE_VIEW_KEY,
+            "Agenda",
+        )
+        monkeypatch.setitem(
+            schedule_display.st.session_state,
+            schedule_display.VIEW_RADIO_KEY,
+            "Timeline",
+        )
+
+        assert schedule_display._resolve_active_view_label() == "Month"
+        assert (
+            schedule_display.st.session_state[schedule_display.ACTIVE_VIEW_KEY]
+            == "Month"
+        )
 
 
 class TestTaskBreakdown:
