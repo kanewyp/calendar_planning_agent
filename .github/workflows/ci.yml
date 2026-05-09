@@ -1,12 +1,18 @@
 # =============================================================================
 # .github/workflows/ci.yml — GitHub Actions CI pipeline
 # =============================================================================
-# Runs linting and tests on every push and pull request.
+# Two jobs:
 #
-# STEPS TO COMPLETE (later):
-# 1. Add a linting step (ruff or flake8).
-# 2. Add a type-checking step (mypy or pyright).
-# 3. Add integration tests with a live Anthropic key (as a secret).
+#   1. fast-tests — runs on every push and PR. No credentials needed.
+#                   Restricted to tests/programmatic/ with LLM_PROVIDER=mock.
+#                   Must stay green to merge.
+#
+#   2. real-llm-tests — runs only when ANTHROPIC_API_KEY secret is present.
+#                       Skipped on forks and on PRs from contributors without
+#                       access to repo secrets. Calls real Anthropic API.
+#
+# tests/pipeline_unit/ and tests/llm_integration/ require a real LLM and
+# auto-skip when LLM_PROVIDER=mock, so they run only in real-llm-tests.
 # =============================================================================
 
 name: CI
@@ -18,7 +24,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  fast-tests:
+    name: Fast tests (mocked, no credentials)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -38,8 +45,53 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Run tests
+      - name: Run programmatic test suite
         env:
           CALENDAR_MODE: mock
+          LLM_PROVIDER: mock
+        run: pytest -q tests/programmatic/
+
+  real-llm-tests:
+    name: Real-LLM tests (Anthropic, optional)
+    runs-on: ubuntu-latest
+    needs: fast-tests
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Skip if no Anthropic API key configured
+        id: check_secret
+        env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: pytest -v
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY not set; skipping real-LLM tests."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run pipeline-unit + integration suites
+        if: steps.check_secret.outputs.skip == 'false'
+        env:
+          CALENDAR_MODE: mock
+          LLM_PROVIDER: anthropic
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_DECOMPOSITION_MODEL: claude-haiku-4-5-20251001
+          LLM_RATIONALE_MODEL: claude-haiku-4-5-20251001
+        run: |
+          pytest -q tests/pipeline_unit/
+          pytest -v -m integration tests/llm_integration/
