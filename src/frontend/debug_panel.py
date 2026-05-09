@@ -53,6 +53,12 @@ def _format_trace_event(event: DebugTraceEvent) -> list[str]:
     if node == "decompose_goal":
         items = details.get("items", [])
         lines.append(f"- subtasks: {_format_named_items(items)}")
+    elif node == "decomposition_critic":
+        issues = details.get("issues", [])
+        lines.append(f"- issues: {_format_named_items(issues)}")
+    elif node == "revise_decomposition":
+        items = details.get("items", [])
+        lines.append(f"- revised subtasks: {_format_named_items(items)}")
     elif node.startswith("schedule_"):
         events = details.get("events", [])
         lines.append(f"- events: {_format_named_items(events)}")
@@ -61,6 +67,12 @@ def _format_trace_event(event: DebugTraceEvent) -> list[str]:
             lines.append(
                 f"- {strategy}: passed={validation.get('passed')} "
                 f"violations={validation.get('violation_count')}"
+            )
+    elif node == "review_candidates":
+        for reviewer, review in details.items():
+            lines.append(
+                f"- {reviewer}: recommends={review.get('recommended_strategy')} "
+                f"source={review.get('source')}"
             )
 
     return lines

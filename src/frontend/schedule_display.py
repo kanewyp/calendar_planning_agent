@@ -177,6 +177,28 @@ def _render_strategy_summary(state: AgentState, strategy_name: str) -> None:
             unsafe_allow_html=True,
         )
         st.info(rationale)
+        _render_candidate_reviews(state, strategy_name)
+
+
+def _render_candidate_reviews(state: AgentState, strategy_name: str) -> None:
+    reviews = state.get("candidate_reviews", {})
+    if not reviews:
+        return
+
+    with st.expander("Agent reviews", expanded=False):
+        for reviewer_name, review in reviews.items():
+            scores = review.get("scores", {})
+            comments = review.get("comments", {})
+            score = scores.get(strategy_name, "n/a")
+            comment = comments.get(strategy_name, "")
+            recommended = review.get("recommended_strategy")
+            marker = "recommended" if recommended == strategy_name else "reviewed"
+            st.markdown(
+                f"**{reviewer_name.replace('_', ' ').title()}** "
+                f"({marker}, score: {score}/10)"
+            )
+            if comment:
+                st.caption(comment)
 
 
 def render_calendar_view(state: AgentState) -> str:
