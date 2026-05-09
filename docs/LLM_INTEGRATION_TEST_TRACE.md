@@ -94,7 +94,7 @@ scenario**, not once per test. All tests in a file share that single response.
 
 ### Execution Summary
 
-**Run date:** 2026-05-09
+**Run date:** 2026-05-01
 **Branch:** `test/unit-test`
 **Command:** `CALENDAR_MODE=mock .venv/bin/pytest tests/llm_integration/ -v -m integration`
 **Provider:** `vertex_ai` — `google/gemini-2.5-flash`
@@ -285,4 +285,4 @@ One fixture (`real_revision`) makes 1 LLM call shared by all 15 tests.
 
 ---
 
-*Last run: 2026-05-09 — 99/99 PASS, 0 failures, ~113 s.*
+*Last run: 2026-05-01 — 99/99 PASS, 0 failures, ~113 s.*

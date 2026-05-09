@@ -51,7 +51,7 @@ CALENDAR_MODE=mock .venv/bin/pytest tests/llm_integration/ -v -m integration -s
 
 ### Execution Summary
 
-**Run date:** 2026-05-08
+**Run date:** 2026-05-01
 **Branch:** `test/unit-test`
 **Command:** `CALENDAR_MODE=mock .venv/bin/pytest tests/pipeline_unit/ -v`
 **Python:** 3.13.5 | **pytest:** 8.4.2 | **Duration:** ~1 s
