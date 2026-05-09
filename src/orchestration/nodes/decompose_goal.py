@@ -202,6 +202,72 @@ _HIGH_DURATION_FLOOR = 75
 _MAX_WARNINGS = 20
 
 
+def parse_and_validate_subtasks(
+    raw: Any,
+    *,
+    max_session: int,
+    error_prefix: str = "Goal decomposition failed",
+) -> list[Subtask]:
+    """Validate LLM-produced subtask JSON and return normalized subtasks."""
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(
+            f"{error_prefix}: expected a non-empty JSON array of subtasks"
+        )
+
+    subtasks: list[Subtask] = []
+    required_keys = {"name", "description", "duration_minutes"}
+    for index, item in enumerate(raw, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"{error_prefix}: subtask {index} is not an object")
+
+        # Normalise common LLM variations.
+        if "duration" in item and "duration_minutes" not in item:
+            item["duration_minutes"] = item.pop("duration")
+
+        missing_keys = required_keys - set(item)
+        extra_keys = set(item) - required_keys
+        if missing_keys or extra_keys:
+            details: list[str] = []
+            if missing_keys:
+                details.append(f"missing keys {sorted(missing_keys)}")
+            if extra_keys:
+                details.append(f"unexpected keys {sorted(extra_keys)}")
+            raise ValueError(
+                f"{error_prefix}: subtask {index} has invalid fields "
+                f"({', '.join(details)})"
+            )
+
+        name = item["name"]
+        description = item["description"]
+        duration = item["duration_minutes"]
+
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{error_prefix}: subtask {index} has an invalid name")
+        if not isinstance(description, str):
+            raise ValueError(
+                f"{error_prefix}: subtask {index} has an invalid description"
+            )
+        if not isinstance(duration, int) or duration <= 0:
+            raise ValueError(
+                f"{error_prefix}: subtask {index} has an invalid duration"
+            )
+        if duration > max_session:
+            raise ValueError(
+                f"{error_prefix}: subtask {index} duration {duration} "
+                f"exceeds max session {max_session}"
+            )
+
+        subtasks.append(
+            Subtask(
+                name=name.strip(),
+                description=description,
+                duration_minutes=duration,
+            )
+        )
+
+    return subtasks
+
+
 def _check_tag_quality(subtasks: list[Subtask]) -> dict[str, Any]:
     """Inspect tags for common LLM mistakes; return diagnostics for tracing.
 
@@ -303,65 +369,11 @@ def decompose_goal_node(state: AgentState) -> dict[str, Any]:
             f"Goal decomposition failed: {str(exc)}"
         ) from exc
 
-    if not isinstance(raw, list) or not raw:
-        raise ValueError(
-            "Goal decomposition failed: expected a non-empty JSON array of subtasks"
-        )
-
-    subtasks: list[Subtask] = []
-    required_keys = {"name", "description", "duration_minutes"}
-    for index, item in enumerate(raw, start=1):
-        if not isinstance(item, dict):
-            raise ValueError(
-                f"Goal decomposition failed: subtask {index} is not an object"
-            )
-
-        # Normalise common LLM variations.
-        if "duration" in item and "duration_minutes" not in item:
-            item["duration_minutes"] = item.pop("duration")
-
-        missing_keys = required_keys - set(item)
-        extra_keys = set(item) - required_keys
-        if missing_keys or extra_keys:
-            details: list[str] = []
-            if missing_keys:
-                details.append(f"missing keys {sorted(missing_keys)}")
-            if extra_keys:
-                details.append(f"unexpected keys {sorted(extra_keys)}")
-            raise ValueError(
-                f"Goal decomposition failed: subtask {index} has invalid fields "
-                f"({', '.join(details)})"
-            )
-
-        name = item["name"]
-        description = item["description"]
-        duration = item["duration_minutes"]
-
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError(
-                f"Goal decomposition failed: subtask {index} has an invalid name"
-            )
-        if not isinstance(description, str):
-            raise ValueError(
-                f"Goal decomposition failed: subtask {index} has an invalid description"
-            )
-        if not isinstance(duration, int) or duration <= 0:
-            raise ValueError(
-                f"Goal decomposition failed: subtask {index} has an invalid duration"
-            )
-        if duration > max_session:
-            raise ValueError(
-                f"Goal decomposition failed: subtask {index} duration {duration} "
-                f"exceeds max session {max_session}"
-            )
-
-        subtasks.append(
-            Subtask(
-                name=name.strip(),
-                description=description,
-                duration_minutes=duration,
-            )
-        )
+    subtasks = parse_and_validate_subtasks(
+        raw,
+        max_session=max_session,
+        error_prefix="Goal decomposition failed",
+    )
 
     # Non-fatal tag-quality inspection. Surfaced through trace details so
     # reviewers can spot upstream LLM misbehaviour without breaking runs.

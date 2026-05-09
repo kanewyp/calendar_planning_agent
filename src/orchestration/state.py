@@ -79,6 +79,13 @@ class AgentState(TypedDict, total=False):
     # --- Goal decomposition (set by decompose_goal node) ---
     subtasks: list[Subtask]
 
+    # --- Decomposition critique/revision (set by decomposition review nodes) ---
+    decomposition_review_passed: bool
+    decomposition_review_issues: list[dict[str, str]]
+    decomposition_revision_instruction: str
+    decomposition_revised: bool
+    decomposition_revision_count: int
+
     # --- Candidate schedules (set by the three heuristic branches) ---
     candidate_deadline_first: list[ProposedEvent]
     candidate_min_fragmentation: list[ProposedEvent]
@@ -91,6 +98,10 @@ class AgentState(TypedDict, total=False):
     # --- Rationales per candidate (set by generate_rationales node) ---
     # Maps strategy name → short explanation of the tradeoff
     candidate_rationales: dict[str, str]
+
+    # --- Multi-agent candidate reviews (set by review_candidates node) ---
+    # Maps reviewer name → structured strategy scores/comments/recommendation
+    candidate_reviews: dict[str, dict[str, Any]]
 
     # --- Near-duplicate detection (set by build_proposal node) ---
     # True if all three candidates produce effectively the same schedule

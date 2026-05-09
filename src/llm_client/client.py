@@ -36,7 +36,7 @@ class LLMResponseTruncated(RuntimeError):
 
 
 def _truncation_message(*, purpose: str, max_tokens: int) -> str:
-    if purpose == "rationale":
+    if purpose in {"rationale", "candidate_review"}:
         return (
             "LLM text response was truncated at max_tokens before it could be "
             f"completed. Increase LLM_RATIONALE_MAX_TOKENS above {max_tokens} "
@@ -105,7 +105,7 @@ def _model_for_purpose(provider: str, purpose: str) -> str:
         return "mock"
     configured_model = (
         settings.LLM_RATIONALE_MODEL
-        if purpose == "rationale"
+        if purpose in {"rationale", "candidate_review"}
         else settings.LLM_DECOMPOSITION_MODEL
     )
     if configured_model:
@@ -133,7 +133,7 @@ def get_llm_metadata(purpose: str) -> dict[str, str]:
 
 
 def _max_tokens_for_purpose(purpose: str) -> int:
-    if purpose == "rationale":
+    if purpose in {"rationale", "candidate_review"}:
         return settings.LLM_RATIONALE_MAX_TOKENS
     return settings.LLM_DECOMPOSITION_MAX_TOKENS
 
@@ -302,6 +302,31 @@ def _call_mock(prompt: str, *, purpose: str) -> str:
         return (
             "This strategy uses the available work blocks according to its "
             "scheduling rule while keeping all proposed events visible for review."
+        )
+    if purpose == "decomposition_critic":
+        return json.dumps(
+            {
+                "passed": True,
+                "issues": [],
+                "revision_instruction": "",
+            }
+        )
+    if purpose == "candidate_review":
+        return json.dumps(
+            {
+                "recommended_strategy": "deadline_first",
+                "scores": {
+                    "deadline_first": 8,
+                    "min_fragmentation": 7,
+                    "energy_aware": 7,
+                },
+                "comments": {
+                    "deadline_first": "Provides a straightforward schedule with deadline buffer.",
+                    "min_fragmentation": "Keeps work reasonably consolidated.",
+                    "energy_aware": "Accounts for energy where the calendar allows.",
+                },
+                "summary": "deadline_first is the safest default in mock mode.",
+            }
         )
     return json.dumps(
         [
