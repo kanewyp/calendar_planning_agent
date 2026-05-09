@@ -30,11 +30,22 @@ Thumbs.db
 htmlcov/
 .coverage
 
-# Google OAuth tokens — NEVER commit these
+# Google OAuth / service-account secrets — NEVER commit these
 token.json
 credentials.json
 *credentials*.json
+*credential*.json
 google-credentials.json
+google_credential.json
+google_credentials.json
+*-service-account.json
+*service_account*.json
+
+# Generic key/cert material
+*.pem
+*.key
+*.p12
+*.keystore
 
 # Streamlit
 .streamlit/secrets.toml
