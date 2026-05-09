@@ -18,22 +18,23 @@ The current integration baseline has the core mock-mode application flow impleme
 
 ## Test Status
 
-Current command:
+Three test suites, all passing:
 
 ```bash
-.venv/bin/pytest -q
+# Fast suite — programmatic unit + pipeline unit (218 tests, ~2 s, no credentials)
+CALENDAR_MODE=mock .venv/bin/pytest tests/ -q --ignore=tests/llm_integration
+
+# LLM integration suite (99 tests, ~113 s, requires Google ADC credentials)
+CALENDAR_MODE=mock .venv/bin/pytest tests/llm_integration/ -v -m integration
 ```
 
-Current result:
+| Suite | Path | Tests | LLM called? | Credentials needed |
+|-------|------|-------|-------------|-------------------|
+| Programmatic unit | `tests/programmatic/` | 118 | No (mocked) | No |
+| Pipeline unit | `tests/pipeline_unit/` | 100 | No (mocked) | No |
+| LLM integration | `tests/llm_integration/` | 99 | **Yes** (Vertex AI) | Google ADC |
 
-```text
-118 passed
-```
-
-The previous no-op `pass # TODO` tests in `tests/test_validator.py`,
-`tests/test_calendar_api.py`, and
-`tests/test_orchestration.py::TestValidateCandidates` have been replaced with
-assertive unit tests.
+All 317 tests pass as of 2026-05-09.
 
 ## Known Gaps
 

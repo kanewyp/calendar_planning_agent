@@ -20,21 +20,41 @@ CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py
 
 ## Test
 
-Current baseline:
+### Fast suite — no credentials needed (~2 s)
+
+Programmatic unit tests + pipeline unit tests. Safe for CI.
 
 ```bash
-.venv/bin/pytest -q
+CALENDAR_MODE=mock .venv/bin/pytest tests/ -q --ignore=tests/llm_integration
 ```
 
-The suite currently passes, but do not treat it as complete coverage until remaining no-op tests are replaced. See `docs/STATUS.md`.
-
-Useful targeted runs:
+Targeted runs:
 
 ```bash
-.venv/bin/pytest -q tests/test_llm_client.py
-.venv/bin/pytest -q tests/test_orchestration.py
-.venv/bin/pytest -q tests/test_frontend.py
-.venv/bin/pytest -q tests/test_validator.py tests/test_calendar_api.py
+CALENDAR_MODE=mock .venv/bin/pytest -q tests/programmatic/test_llm_client.py
+CALENDAR_MODE=mock .venv/bin/pytest -q tests/programmatic/test_orchestration.py
+CALENDAR_MODE=mock .venv/bin/pytest -q tests/pipeline_unit/
+```
+
+### LLM integration suite — real API calls (~60–90 s)
+
+Sends genuine prompts to Vertex AI / Gemini 2.5 Flash. Requires Google ADC credentials
+(service-account JSON or `gcloud auth application-default login`).
+
+```bash
+CALENDAR_MODE=mock .venv/bin/pytest tests/llm_integration/ -v -m integration -s
+```
+
+The suite auto-skips if credentials are absent. See `docs/LLM_INTEGRATION_TEST_TRACE.md`
+for the full test inventory and assertion design rationale.
+
+### Test layout
+
+```
+tests/
+  programmatic/      # 118 tests — unit tests for all src/ modules, mocked LLM/Calendar
+  pipeline_unit/     # 100 tests — orchestration pipeline logic, mocked LLM (T01–T99)
+  llm_integration/   # 25 tests  — real LLM API calls, @pytest.mark.integration
 ```
 
 ## Local App Smoke Test
