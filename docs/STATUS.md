@@ -27,7 +27,7 @@ Current command:
 Current result:
 
 ```text
-81 passed
+118 passed
 ```
 
 The previous no-op `pass # TODO` tests in `tests/test_validator.py`,
@@ -85,6 +85,13 @@ Current behavior:
 - Schedule traces now distinguish pure `dependency_order` from
   strategy-adjusted `expected_strategy_order`. Energy-aware event traces include
   task complexity, period energy score, and energy mismatch score.
+- Multi-agent decomposition review is now captured as separate
+  `decomposition_critic` and optional `revise_decomposition` trace steps. The
+  critic can request one bounded revision before calendar fetching begins.
+- Candidate schedules are now reviewed by multiple specialized reviewer prompts
+  inside `review_candidates`. Reviewer recommendations, scores, and fallback
+  status are stored in `AgentState["candidate_reviews"]` and surfaced in the
+  Streamlit review UI.
 
 ## LLM Providers
 
@@ -95,7 +102,9 @@ Current behavior:
 - `LLM_PROVIDER=gemini` uses Gemini's OpenAI-compatible Chat Completions endpoint.
 - `LLM_PROVIDER=vertex_ai` uses Vertex AI's OpenAI-compatible Chat Completions endpoint with Google Cloud Application Default Credentials.
 - `LLM_PROVIDER=mock` returns deterministic local responses for end-to-end mock walkthroughs.
-- Goal decomposition uses the `decomposition` purpose; schedule explanations use the `rationale` purpose, so models can be configured separately.
+- Goal decomposition uses the `decomposition` purpose; decomposition critique
+  uses `decomposition_critic`; candidate comparison uses `candidate_review`;
+  schedule explanations use `rationale`.
 
 ## Approval Contract
 

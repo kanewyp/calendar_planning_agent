@@ -21,8 +21,13 @@ import pytest
 
 from src.orchestration.nodes.build_proposal import build_proposal_node
 from src.orchestration.nodes.decompose_goal import decompose_goal_node
+from src.orchestration.nodes.decomposition_review import (
+    decomposition_critic_node,
+    revise_decomposition_node,
+)
 from src.orchestration.nodes.fetch_events import fetch_events_node
 from src.orchestration.nodes.generate_rationales import generate_rationales_node
+from src.orchestration.nodes.review_candidates import review_candidates_node
 from src.orchestration.nodes.schedule_candidates import (
     deadline_first_node,
     energy_aware_node,
@@ -173,6 +178,112 @@ class TestDecomposeGoalNode:
         ):
             with pytest.raises(RuntimeError, match="Goal decomposition failed"):
                 decompose_goal_node(state)
+
+
+class TestDecompositionReviewNodes:
+    def test_critic_passes_without_revision_instruction(self):
+        state = {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "context": "I know JavaScript already.",
+            "max_session_minutes": 90,
+            "subtasks": [
+                {
+                    "name": "Read React docs",
+                    "description": "[group:intro] [shuffle:no] [complexity:low] Read docs.",
+                    "duration_minutes": 45,
+                }
+            ],
+        }
+
+        with patch(
+            "src.orchestration.nodes.decomposition_review.call_llm_json",
+            return_value={
+                "passed": True,
+                "issues": [],
+                "revision_instruction": "",
+            },
+        ):
+            result = decomposition_critic_node(state)
+
+        assert result["decomposition_review_passed"] is True
+        assert result["decomposition_review_issues"] == []
+        assert result["decomposition_revision_count"] == 0
+        assert result["debug_trace"][0]["node"] == "decomposition_critic"
+
+    def test_critic_failure_falls_back_to_pass(self):
+        state = {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "max_session_minutes": 90,
+            "subtasks": [
+                {
+                    "name": "Read React docs",
+                    "description": "Read docs.",
+                    "duration_minutes": 45,
+                }
+            ],
+        }
+
+        with patch(
+            "src.orchestration.nodes.decomposition_review.call_llm_json",
+            side_effect=RuntimeError("critic unavailable"),
+        ):
+            result = decomposition_critic_node(state)
+
+        assert result["decomposition_review_passed"] is True
+        assert result["decomposition_review_issues"] == []
+        trace = result["debug_trace"][0]
+        assert trace["summary"]["source"] == "fallback"
+        assert trace["details"]["failure"]["error_message"] == "critic unavailable"
+
+    def test_revision_applies_critic_feedback_and_revalidates_subtasks(self):
+        state = {
+            "goal": "Build a final project",
+            "deadline": "2026-04-17",
+            "context": "",
+            "max_session_minutes": 90,
+            "subtasks": [
+                {
+                    "name": "Build project",
+                    "description": "[group:build] [shuffle:no] [complexity:high] Build it.",
+                    "duration_minutes": 90,
+                }
+            ],
+            "decomposition_review_issues": [
+                {
+                    "severity": "major",
+                    "subtask": "Build project",
+                    "issue": "Too broad.",
+                    "suggestion": "Split implementation and testing.",
+                }
+            ],
+            "decomposition_revision_instruction": "Split build work into smaller tasks.",
+            "decomposition_revision_count": 0,
+        }
+        revised = [
+            {
+                "name": "Implement core feature",
+                "description": "[group:implementation] [shuffle:no] [complexity:high] Build the main feature.",
+                "duration_minutes": 80,
+            },
+            {
+                "name": "Test final project",
+                "description": "[group:testing] [shuffle:no] [complexity:medium] Test the feature and fix issues.",
+                "duration_minutes": 60,
+            },
+        ]
+
+        with patch(
+            "src.orchestration.nodes.decomposition_review.call_llm_json",
+            return_value=revised,
+        ):
+            result = revise_decomposition_node(state)
+
+        assert result["subtasks"] == revised
+        assert result["decomposition_revised"] is True
+        assert result["decomposition_revision_count"] == 1
+        assert result["debug_trace"][0]["node"] == "revise_decomposition"
 
 
 class TestDeadlineFirstHeuristic:
@@ -678,6 +789,112 @@ class TestValidateCandidates:
         for validation in result["candidate_validations"].values():
             assert validation["passed"] is True
             assert validation["violations"] == []
+
+
+class TestReviewCandidates:
+    def _state(self) -> dict[str, Any]:
+        candidate = [
+            {
+                "name": "Read React docs",
+                "description": "Official docs",
+                "start": "2026-04-06T10:00:00+00:00",
+                "end": "2026-04-06T11:00:00+00:00",
+            }
+        ]
+        return {
+            "goal": "Learn React basics",
+            "deadline": "2026-04-17",
+            "context": "I know JavaScript.",
+            "work_start": "09:00",
+            "work_end": "18:00",
+            "energy_levels": {
+                "morning": "high",
+                "afternoon": "medium",
+                "evening": "low",
+            },
+            "subtasks": [
+                {
+                    "name": "Read React docs",
+                    "description": "[group:intro] [shuffle:no] [complexity:low] Read docs.",
+                    "duration_minutes": 45,
+                }
+            ],
+            "candidate_deadline_first": candidate,
+            "candidate_min_fragmentation": list(candidate),
+            "candidate_energy_aware": list(candidate),
+            "candidate_validations": {
+                "deadline_first": {"passed": True, "violations": []},
+                "min_fragmentation": {"passed": True, "violations": []},
+                "energy_aware": {"passed": True, "violations": []},
+            },
+        }
+
+    def test_multiple_reviewer_prompts_are_collected(self):
+        review = {
+            "recommended_strategy": "energy_aware",
+            "scores": {
+                "deadline_first": 7,
+                "min_fragmentation": 6,
+                "energy_aware": 9,
+            },
+            "comments": {
+                "deadline_first": "Good buffer.",
+                "min_fragmentation": "Clean blocks.",
+                "energy_aware": "Best energy match.",
+            },
+            "summary": "Energy-aware best matches the user's profile.",
+        }
+
+        with patch(
+            "src.orchestration.nodes.review_candidates.call_llm_json",
+            return_value=review,
+        ) as call_llm_json:
+            result = review_candidates_node(self._state())
+
+        assert call_llm_json.call_count == 4
+        assert set(result["candidate_reviews"]) == {
+            "deadline_reviewer",
+            "energy_reviewer",
+            "fragmentation_reviewer",
+            "feasibility_reviewer",
+        }
+        first_review = result["candidate_reviews"]["deadline_reviewer"]
+        assert first_review["recommended_strategy"] == "energy_aware"
+        assert first_review["scores"]["energy_aware"] == 9
+        assert first_review["source"] == "llm"
+        assert result["debug_trace"][0]["summary"]["fallback_review_count"] == 0
+
+    def test_reviewer_failure_falls_back_for_all_reviewers(self):
+        state = self._state()
+        state["candidate_validations"]["deadline_first"] = {
+            "passed": False,
+            "violations": [
+                {
+                    "event_name": "Read React docs",
+                    "violation_type": "OVERLAP",
+                    "description": "Overlaps busy time.",
+                }
+            ],
+        }
+
+        with patch(
+            "src.orchestration.nodes.review_candidates.call_llm_json",
+            side_effect=RuntimeError("review provider unavailable"),
+        ) as call_llm_json:
+            result = review_candidates_node(state)
+
+        assert call_llm_json.call_count == 1
+        assert result["candidate_reviews"]["deadline_reviewer"]["source"] == "fallback"
+        assert (
+            result["candidate_reviews"]["deadline_reviewer"]["recommended_strategy"]
+            == "min_fragmentation"
+        )
+        trace = result["debug_trace"][0]
+        assert trace["summary"]["fallback_review_count"] == 4
+        assert (
+            trace["details"]["deadline_reviewer"]["failure"]["error_message"]
+            == "review provider unavailable"
+        )
 
 
 class TestGenerateRationales:
