@@ -28,6 +28,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: real LLM API call required — slow, needs Google ADC credentials",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
