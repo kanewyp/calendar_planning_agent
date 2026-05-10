@@ -22,6 +22,37 @@ from src.calendar_api.auth import build_calendar_service
 AGENT_TAG = "[CALENDAR_AGENT]"
 
 
+def _parse_event_boundary(
+    event_boundary: dict[str, str],
+    *,
+    is_end_boundary: bool,
+) -> datetime.datetime | None:
+    """Convert Google Calendar boundary payload to a timezone-aware datetime.
+
+    Google returns either:
+    - {"dateTime": "..."} for timed events
+    - {"date": "YYYY-MM-DD"} for all-day events
+    """
+    raw_datetime = event_boundary.get("dateTime")
+    if raw_datetime:
+        parsed = datetime.datetime.fromisoformat(raw_datetime)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=datetime.timezone.utc)
+        return parsed
+
+    raw_date = event_boundary.get("date")
+    if not raw_date:
+        return None
+
+    day = datetime.date.fromisoformat(raw_date)
+    if is_end_boundary:
+        parsed = datetime.datetime.combine(day, datetime.time.min)
+    else:
+        parsed = datetime.datetime.combine(day, datetime.time.min)
+
+    return parsed.replace(tzinfo=datetime.timezone.utc)
+
+
 def fetch_busy_blocks(
     time_min: datetime.datetime,
     time_max: datetime.datetime,
@@ -52,7 +83,43 @@ def fetch_busy_blocks(
        c. Append {"start": <start_iso>, "end": <end_iso>} to the result list.
     4. Return the list sorted by start time.
     """
-    pass  # TODO: implement
+    service = build_calendar_service()
+    busy_blocks: list[dict[str, str]] = []
+    page_token: str | None = None
+
+    while True:
+        response = (
+            service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=time_min.isoformat(),
+                timeMax=time_max.isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                pageToken=page_token,
+            )
+            .execute()
+        )
+
+        for item in response.get("items", []):
+            start_data = item.get("start", {})
+            end_data = item.get("end", {})
+
+            start_dt = _parse_event_boundary(start_data, is_end_boundary=False)
+            end_dt = _parse_event_boundary(end_data, is_end_boundary=True)
+            if not start_dt or not end_dt or start_dt >= end_dt:
+                continue
+
+            busy_blocks.append(
+                {"start": start_dt.isoformat(), "end": end_dt.isoformat()}
+            )
+
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    busy_blocks.sort(key=lambda b: b["start"])
+    return busy_blocks
 
 
 def create_event(
@@ -61,6 +128,7 @@ def create_event(
     start: datetime.datetime,
     end: datetime.datetime,
     calendar_id: str = "primary",
+    color_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a single event on the user's Google Calendar.
 
@@ -73,6 +141,7 @@ def create_event(
         start: Event start datetime, timezone-aware.
         end: Event end datetime, timezone-aware.
         calendar_id: Google Calendar ID, default "primary".
+        color_id: Optional Google Calendar event color ID.
 
     Returns:
         The Google Calendar API response dict for the created event.
@@ -91,12 +160,24 @@ def create_event(
     SECURITY NOTE:
     - This function must NEVER call events().update() or events().delete().
     """
-    pass  # TODO: implement
+    service = build_calendar_service()
+    event_body = {
+        "summary": summary,
+        "description": f"{AGENT_TAG} {description}",
+        # dateTime includes offset; keeping payload minimal avoids invalid tz labels.
+        "start": {"dateTime": start.isoformat()},
+        "end": {"dateTime": end.isoformat()},
+    }
+    if color_id:
+        event_body["colorId"] = str(color_id)
+
+    return service.events().insert(calendarId=calendar_id, body=event_body).execute()
 
 
 def create_events_batch(
     events: list[dict[str, Any]],
     calendar_id: str = "primary",
+    color_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Write multiple events to the calendar sequentially.
 
@@ -104,6 +185,7 @@ def create_events_batch(
         events: List of event dicts, each with keys:
             name, description, start (ISO str), end (ISO str).
         calendar_id: Google Calendar ID.
+        color_id: Optional Google Calendar event color ID applied to each event.
 
     Returns:
         List of Google Calendar API response dicts.
@@ -114,4 +196,18 @@ def create_events_batch(
     3. Call create_event(name, description, start_dt, end_dt, calendar_id).
     4. Collect and return all responses.
     """
-    pass  # TODO: implement
+    responses: list[dict[str, Any]] = []
+    for event in events:
+        start_dt = datetime.datetime.fromisoformat(event["start"])
+        end_dt = datetime.datetime.fromisoformat(event["end"])
+        description = str(event.get("description", ""))
+        response = create_event(
+            summary=event["name"],
+            description=description,
+            start=start_dt,
+            end=end_dt,
+            calendar_id=calendar_id,
+            color_id=color_id,
+        )
+        responses.append(response)
+    return responses

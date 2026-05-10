@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.orchestration.debug_trace import make_trace_event, trace_update
 from src.orchestration.state import AgentState, ProposedEvent
 
 
@@ -34,4 +35,63 @@ def build_proposal_node(state: AgentState) -> dict[str, Any]:
     the three-column view into a single "All strategies agree" view with
     a simple approve/reject flow.
     """
-    pass  # TODO: implement
+    candidate_keys = (
+        "candidate_deadline_first",
+        "candidate_min_fragmentation",
+        "candidate_energy_aware",
+    )
+    missing = [k for k in candidate_keys if k not in state]
+    if missing:
+        raise ValueError(
+            f"build_proposal_node missing required candidate keys: {missing}"
+        )
+
+    signatures: list[list[tuple[str, str, str, str]]] = []
+    required_event_keys = {"name", "description", "start", "end"}
+    for key in candidate_keys:
+        candidate = state[key]
+        if not isinstance(candidate, list):
+            raise ValueError(
+                f"build_proposal_node: {key} is not a list (got {type(candidate).__name__})"
+            )
+
+        normalized_candidate: list[tuple[str, str, str, str]] = []
+        for index, event in enumerate(candidate, start=1):
+            if not isinstance(event, dict):
+                raise ValueError(
+                    f"build_proposal_node: {key} event {index} is not an object"
+                )
+
+            missing_keys = required_event_keys - set(event)
+            if missing_keys:
+                raise ValueError(
+                    f"build_proposal_node: {key} event {index} missing keys "
+                    f"{sorted(missing_keys)}"
+                )
+
+            normalized_candidate.append(
+                (
+                    event["name"],
+                    event["description"],
+                    event["start"],
+                    event["end"],
+                )
+            )
+
+        signature = sorted(
+            normalized_candidate
+        )
+        signatures.append(signature)
+
+    candidates_identical = signatures[0] == signatures[1] == signatures[2]
+    trace = make_trace_event(
+        "build_proposal",
+        summary={"candidates_identical": candidates_identical},
+        details={
+            "candidate_event_counts": {
+                key: len(state[key])
+                for key in candidate_keys
+            }
+        },
+    )
+    return {"candidates_identical": candidates_identical, **trace_update(trace)}

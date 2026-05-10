@@ -5,9 +5,10 @@
 # frontend sends back the user's strategy choice or rejection.
 #
 # In the user-choice model, the frontend presents all three candidates
-# side-by-side (or collapsed if near-identical) and the user either:
-#   1. Picks one strategy → sets selected_strategy + user_approved=True
-#   2. Rejects all        → sets user_approved=False
+# side-by-side (or collapsed if near-identical). The resume_graph helper then
+# records either:
+#   1. A picked strategy → selected_strategy + user_approved=True
+#   2. Reject all        → user_approved=False
 #
 # READS FROM STATE:  user_approved, selected_strategy
 # WRITES TO STATE:   final_schedule (populated from the chosen candidate)
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.orchestration.debug_trace import make_trace_event, trace_update
 from src.orchestration.state import AgentState
 
 
@@ -34,8 +36,7 @@ def human_approval_node(state: AgentState) -> dict[str, Any]:
     execution pauses before entering this node. The frontend then:
       1. Displays all three candidates with rationales and violations.
       2. Collects the user's choice (pick a strategy or reject all).
-      3. Updates state["selected_strategy"] and state["user_approved"].
-      4. Resumes the graph.
+      3. Calls resume_graph with the approval decision and selected strategy.
 
     When the graph resumes and this node executes:
 
@@ -46,4 +47,44 @@ def human_approval_node(state: AgentState) -> dict[str, Any]:
     2. If state["user_approved"] is False:
        a. Return {} — the conditional edge routes to END.
     """
-    pass  # TODO: implement
+    user_approved = state.get("user_approved")
+
+    if user_approved is False:
+        trace = make_trace_event(
+            "human_approval",
+            summary={"user_approved": False, "selected_strategy": None},
+            details={"decision": "rejected"},
+        )
+        return trace_update(trace)
+
+    if user_approved is not True:
+        raise ValueError(
+            "human_approval_node resumed without a boolean user_approved value "
+            f"(got {user_approved!r})"
+        )
+
+    selected_strategy = state.get("selected_strategy")
+    if selected_strategy not in STRATEGY_TO_STATE_KEY:
+        raise ValueError(
+            f"human_approval_node: invalid selected_strategy {selected_strategy!r}; "
+            f"expected one of {sorted(STRATEGY_TO_STATE_KEY)}"
+        )
+
+    state_key = STRATEGY_TO_STATE_KEY[selected_strategy]
+    if state_key not in state:
+        raise ValueError(
+            f"human_approval_node: candidate '{state_key}' is missing from state"
+        )
+
+    final_schedule = state[state_key]
+    trace = make_trace_event(
+        "human_approval",
+        summary={
+            "user_approved": True,
+            "selected_strategy": selected_strategy,
+            "final_event_count": len(final_schedule),
+        },
+        details={"selected_candidate_key": state_key},
+    )
+
+    return {"final_schedule": final_schedule, **trace_update(trace)}
