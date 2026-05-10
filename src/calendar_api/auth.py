@@ -16,8 +16,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -57,7 +59,23 @@ def get_credentials() -> Credentials:
     - Never log or print the access/refresh tokens.
     - token.json is in .gitignore — ensure it stays that way.
     """
-    pass  # TODO: implement
+    token_path = Path(_TOKEN_PATH)
+    creds: Credentials | None = None
+
+    if token_path.exists():
+        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+
+    if not creds or not creds.valid:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            settings.GOOGLE_CLIENT_SECRET_FILE, SCOPES
+        )
+        creds = flow.run_local_server(port=0)
+
+    token_path.write_text(creds.to_json())
+    return creds
 
 
 def build_calendar_service() -> "Resource":
@@ -67,4 +85,5 @@ def build_calendar_service() -> "Resource":
     1. Call get_credentials() to obtain valid creds.
     2. Return build("calendar", "v3", credentials=creds).
     """
-    pass  # TODO: implement
+    creds = get_credentials()
+    return build("calendar", "v3", credentials=creds)

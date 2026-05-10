@@ -13,7 +13,8 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, TypedDict
+import operator
+from typing import Annotated, Any, TypedDict
 
 
 class Subtask(TypedDict):
@@ -44,6 +45,16 @@ class ValidationResult(TypedDict):
     violations: list[Violation]
 
 
+class DebugTraceEvent(TypedDict, total=False):
+    """A compact observability event produced by a graph node."""
+    node: str
+    status: str
+    created_at: str
+    duration_ms: int
+    summary: dict[str, Any]
+    details: dict[str, Any]
+
+
 class AgentState(TypedDict, total=False):
     """Full state carried through the LangGraph directed graph.
 
@@ -58,6 +69,8 @@ class AgentState(TypedDict, total=False):
     work_start: str                             # "HH:MM"
     work_end: str                               # "HH:MM"
     max_session_minutes: int
+    break_minutes: int                          # Buffer between proposed work sessions
+    energy_levels: dict[str, str]               # {"morning": "high", "afternoon": "medium", "evening": "low"}
 
     # --- Calendar data (set by fetch_events node) ---
     busy_blocks: list[dict[str, str]]           # [{"start": ..., "end": ...}]
@@ -65,6 +78,13 @@ class AgentState(TypedDict, total=False):
 
     # --- Goal decomposition (set by decompose_goal node) ---
     subtasks: list[Subtask]
+
+    # --- Decomposition critique/revision (set by decomposition review nodes) ---
+    decomposition_review_passed: bool
+    decomposition_review_issues: list[dict[str, str]]
+    decomposition_revision_instruction: str
+    decomposition_revised: bool
+    decomposition_revision_count: int
 
     # --- Candidate schedules (set by the three heuristic branches) ---
     candidate_deadline_first: list[ProposedEvent]
@@ -78,6 +98,10 @@ class AgentState(TypedDict, total=False):
     # --- Rationales per candidate (set by generate_rationales node) ---
     # Maps strategy name → short explanation of the tradeoff
     candidate_rationales: dict[str, str]
+
+    # --- Multi-agent candidate reviews (set by review_candidates node) ---
+    # Maps reviewer name → structured strategy scores/comments/recommendation
+    candidate_reviews: dict[str, dict[str, Any]]
 
     # --- Near-duplicate detection (set by build_proposal node) ---
     # True if all three candidates produce effectively the same schedule
@@ -96,3 +120,7 @@ class AgentState(TypedDict, total=False):
 
     # --- Write result ---
     write_results: list[dict[str, Any]]         # API responses from event creation
+
+    # --- Debug trace ---
+    # One compact trace event per node. The reducer lets parallel branches append.
+    debug_trace: Annotated[list[DebugTraceEvent], operator.add]

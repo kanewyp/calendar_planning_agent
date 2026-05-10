@@ -1,0 +1,194 @@
+# Developer Guide
+
+This is the concise day-to-day guide. For architecture, read `docs/ARCHITECTURE.md`. For current progress and gaps, read `docs/STATUS.md`.
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Mock calendar mode does not require Google credentials. Use `LLM_PROVIDER=mock`
+for a fully local walkthrough that also skips paid/hosted LLM calls:
+
+```bash
+CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py
+```
+
+## Test
+
+### Fast suite — no credentials needed (~2 s)
+
+Programmatic unit tests + pipeline unit tests. Safe for CI.
+
+```bash
+CALENDAR_MODE=mock .venv/bin/pytest tests/ -q --ignore=tests/llm_integration
+```
+
+Targeted runs:
+
+```bash
+CALENDAR_MODE=mock .venv/bin/pytest -q tests/programmatic/test_llm_client.py
+CALENDAR_MODE=mock .venv/bin/pytest -q tests/programmatic/test_orchestration.py
+CALENDAR_MODE=mock .venv/bin/pytest -q tests/pipeline_unit/
+```
+
+### LLM integration suite — real API calls (~60–90 s)
+
+Sends genuine prompts to Vertex AI / Gemini 2.5 Flash. Requires Google ADC credentials
+(service-account JSON or `gcloud auth application-default login`).
+
+```bash
+CALENDAR_MODE=mock .venv/bin/pytest tests/llm_integration/ -v -m integration -s
+```
+
+The suite auto-skips if credentials are absent. See `docs/LLM_INTEGRATION_TEST_TRACE.md`
+for the full test inventory and assertion design rationale.
+
+### Test layout
+
+```
+tests/
+  programmatic/      # 118 tests — unit tests for all src/ modules, mocked LLM/Calendar
+  pipeline_unit/     # 100 tests — orchestration pipeline logic, mocked LLM (T01–T99)
+  llm_integration/   # 25 tests  — real LLM API calls, @pytest.mark.integration
+```
+
+## Local App Smoke Test
+
+Run:
+
+```bash
+CALENDAR_MODE=mock LLM_PROVIDER=mock streamlit run src/app.py
+```
+
+Walkthrough to record:
+
+1. Submit intake form.
+2. Confirm all candidate schedules render.
+3. Approve one strategy and confirm mock events are created.
+4. Restart and reject all, confirming no writes.
+5. Expand "Debug trace" and copy the compact report if a schedule looks wrong.
+
+## Environment Variables
+
+Key values from `.env.example`:
+
+- `LLM_PROVIDER` -- `anthropic`, `gemini`, `vertex_ai`, `openai_compatible`, or `mock`
+- `LLM_API_KEY` -- generic key for Gemini/OpenAI-compatible providers
+- `GEMINI_API_KEY` -- optional Gemini-specific key
+- `VERTEX_PROJECT_ID` -- Google Cloud project for Vertex AI
+- `VERTEX_LOCATION` -- Vertex AI location, defaults to `global`
+- `ANTHROPIC_API_KEY` -- legacy Anthropic-specific key
+- `LLM_BASE_URL` -- required for `LLM_PROVIDER=openai_compatible`
+- `LLM_DECOMPOSITION_MODEL`
+- `LLM_RATIONALE_MODEL`
+- `GOOGLE_CLIENT_SECRET_FILE`
+- `CALENDAR_MODE`
+- `DEFAULT_WORK_START`
+- `DEFAULT_WORK_END`
+
+Use `CALENDAR_MODE=mock` unless explicitly testing live Google Calendar behavior.
+Use `LLM_PROVIDER=mock` unless explicitly testing a live LLM provider.
+
+Gemini example:
+
+```dotenv
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=<your Gemini API key>
+LLM_DECOMPOSITION_MODEL=gemini-2.5-flash
+LLM_RATIONALE_MODEL=gemini-2.5-flash
+```
+
+Vertex AI example using Google Cloud credits:
+
+```bash
+gcloud auth application-default login
+gcloud auth application-default set-quota-project <your-google-cloud-project-id>
+```
+
+```dotenv
+LLM_PROVIDER=vertex_ai
+VERTEX_PROJECT_ID=<your-google-cloud-project-id>
+VERTEX_LOCATION=global
+LLM_DECOMPOSITION_MODEL=google/gemini-2.5-flash
+LLM_RATIONALE_MODEL=google/gemini-2.5-flash
+```
+
+Smoke test with Vertex AI and mock calendar:
+
+```bash
+CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai streamlit run src/app.py
+```
+
+OpenAI-compatible example for Groq/OpenRouter-style endpoints:
+
+```dotenv
+LLM_PROVIDER=openai_compatible
+LLM_API_KEY=<provider key>
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_DECOMPOSITION_MODEL=<provider model>
+LLM_RATIONALE_MODEL=<provider model>
+```
+
+## Testing Rules
+
+- Mock LLM calls through `_call_llm`, `_call_anthropic`, or `_post_json`.
+- Mock Google Calendar service calls in tests.
+- Do not require live credentials for unit tests.
+- Keep heuristics and validator pure and easy to unit-test.
+- When adding state fields, update `src/orchestration/state.py` first.
+
+## Debug Trace
+
+During review and done phases, Streamlit shows a "Debug trace" expander. Use it
+to inspect the graph's intermediate outputs without digging through terminal
+logs. The compact report is designed to paste into issues or debugging threads.
+
+Trace currently includes:
+
+- goal decomposition provider/model and subtask summaries
+- busy/free calendar slot counts
+- each heuristic's scheduled and unscheduled counts
+- validation pass/fail and violation counts per strategy
+- rationale generation provider/model and text lengths
+- proposal duplicate detection
+- approval decision and selected strategy
+- calendar write mode and written event count
+
+Prompt and response bodies are intentionally omitted by default.
+
+## Development Priorities
+
+Current high-value work:
+
+1. Run and document the full mock-mode app walkthrough.
+2. Verify Gemini or another low-cost live LLM provider.
+3. Verify live Google Calendar mode or explicitly defer it.
+
+## Safety Checklist
+
+Before committing:
+
+```bash
+.venv/bin/pytest -q
+git status --short
+```
+
+Also check:
+
+- No `.env`, `token.json`, `credentials.json`, OAuth token, or API key is staged.
+- No Google Calendar update/delete operation has been added.
+- Mock mode still works.
+- Any new LLM or Google API path is tested with mocks.
+
+## Reference Docs
+
+- `AGENTS.md` / `CLAUDE.md` -- concise AI entrypoints.
+- `docs/STATUS.md` -- current project status.
+- `docs/ARCHITECTURE.md` -- system contracts and graph design.
+- `PROGRAMMER_MANUAL.md` -- long-form detailed reference.
+- `docs/archive/PROJECT_PLAN.md` and `docs/archive/WILL_IMPLEMENTATION_GUIDE.md` -- historical planning/implementation notes.

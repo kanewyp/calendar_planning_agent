@@ -1,12 +1,12 @@
 # =============================================================================
 # .github/workflows/ci.yml — GitHub Actions CI pipeline
 # =============================================================================
-# Runs linting and tests on every push and pull request.
+# Runs the no-credentials programmatic test suite on every push and PR.
 #
-# STEPS TO COMPLETE (later):
-# 1. Add a linting step (ruff or flake8).
-# 2. Add a type-checking step (mypy or pyright).
-# 3. Add integration tests with a live Anthropic key (as a secret).
+# tests/pipeline_unit/ and tests/llm_integration/ require Google ADC and
+# call the real Vertex AI API. They are dev-time verification only and run
+# locally — see docs/EXPERIMENTAL_SETUP.md. Wiring them into CI requires
+# a GCP service account or workload identity federation; not yet set up.
 # =============================================================================
 
 name: CI
@@ -18,7 +18,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  fast-tests:
+    name: Programmatic tests (mocked, no credentials)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -38,8 +39,8 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Run tests
+      - name: Run programmatic test suite
         env:
           CALENDAR_MODE: mock
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: pytest -v
+          LLM_PROVIDER: mock
+        run: pytest -q tests/programmatic/
