@@ -169,16 +169,23 @@ CALENDAR_MODE=mock LLM_PROVIDER=vertex_ai .venv/bin/pytest -v -m integration tes
 See `docs/EXPERIMENTAL_SETUP.md` for the exact commands and
 `docs/REPRODUCIBILITY.md` for determinism rules.
 
+## Project Report
+
+The full write-up of the project — motivation, multi-agent design,
+heuristic comparison, evaluation, and lessons learned — is in
+[GenAI_Report_Final.pdf](GenAI_Report_Final.pdf).
+
 ## Documentation
 
-- `docs/STATUS.md` — current progress, gaps, and next actions.
-- `docs/ARCHITECTURE.md` — graph, state, and module contracts.
-- `docs/DEVELOPER_GUIDE.md` — day-to-day setup, env vars, smoke tests.
-- `docs/EXPERIMENTAL_SETUP.md` — how each test tier is run.
-- `docs/REPRODUCIBILITY.md` — determinism, seeds, version pinning.
-- `docs/PERFORMANCE.md` — token budgets, retries, complexity notes.
-- `docs/TROUBLESHOOTING.md` — common failures and fixes.
-- `PROGRAMMER_MANUAL.md` — long-form reference.
+- [GenAI_Report_Final.pdf](GenAI_Report_Final.pdf) — full project report.
+- [docs/STATUS.md](docs/STATUS.md) — current progress, gaps, and next actions.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — graph, state, and module contracts.
+- [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) — day-to-day setup, env vars, smoke tests.
+- [docs/EXPERIMENTAL_SETUP.md](docs/EXPERIMENTAL_SETUP.md) — how each test tier is run.
+- [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) — determinism, seeds, version pinning.
+- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — token budgets, retries, complexity notes.
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common failures and fixes.
+- [PROGRAMMER_MANUAL.md](PROGRAMMER_MANUAL.md) — long-form reference.
 
 ## Production Deployment
 
