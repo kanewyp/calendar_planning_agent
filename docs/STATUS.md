@@ -132,4 +132,3 @@ Current behavior:
 - `docs/archive/KANE_STATUS.md` -- Kane-specific status notes.
 - `docs/ARCHITECTURE.md` -- stable graph, state, and module contracts.
 - `docs/DEVELOPER_GUIDE.md` -- setup, testing, and local workflow.
-- `PROGRAMMER_MANUAL.md` -- long-form detailed reference manual.

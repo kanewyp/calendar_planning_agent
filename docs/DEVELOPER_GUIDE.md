@@ -207,5 +207,4 @@ Also check:
 
 - `docs/STATUS.md` -- current project status.
 - `docs/ARCHITECTURE.md` -- system contracts and graph design.
-- `PROGRAMMER_MANUAL.md` -- long-form detailed reference.
 - `docs/archive/PROJECT_PLAN.md` and `docs/archive/WILL_IMPLEMENTATION_GUIDE.md` -- historical planning/implementation notes.

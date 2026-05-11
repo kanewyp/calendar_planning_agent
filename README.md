@@ -185,7 +185,6 @@ heuristic comparison, evaluation, and lessons learned — is in
 - [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) — determinism, seeds, version pinning.
 - [docs/PERFORMANCE.md](docs/PERFORMANCE.md) — token budgets, retries, complexity notes.
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — common failures and fixes.
-- [PROGRAMMER_MANUAL.md](PROGRAMMER_MANUAL.md) — long-form reference.
 
 ## Hard Rules
 
